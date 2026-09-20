@@ -33,7 +33,7 @@ Three things your installation sends out carry the same id, so records line up a
 
 - **Session telemetry** — your telemetry exports carry the id as the `user.id` resource attribute, so a collector can group an installation's records.
 - **Feedback** — each feedback acknowledgement names the anonymous installation that recorded it.
-- **DeepSeek requests** — every provider request carries the `x-deepseek-harness-user-id` header, so usage can be attributed per installation.
+- **DeepSeek requests** — when `sendAnonymousUserId` is enabled, each provider request carries the `x-deepseek-harness-user-id` header, so usage can be attributed per installation. It is off by default, and no id is minted when it is off.
 
 ### Observing and resetting the id
 
@@ -41,7 +41,7 @@ The id lives in `$DSH_HOME/.anonymous-user-id` (`$DSH_HOME` defaults to `~/.dsh`
 
 ### Using it in your own package
 
-When you build a feature that should share the installation's anonymous id, import the value once and reuse it — telemetry, feedback, and DeepSeek already use the same id, so your records line up with theirs:
+When you build a feature that should share the installation's anonymous id, import the value once and reuse it — telemetry and feedback already use the same id, and DeepSeek does when `sendAnonymousUserId` is enabled, so your records line up with theirs:
 
 ```ts
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
@@ -121,7 +121,7 @@ These limits describe when the id is a poor fit or needs special attention. They
 - **No recovery after deletion** — losing the file mints a new anonymous identity by design; recovery would require stable derivation material that weakens anonymity.
 - **Best-effort concurrency** — a reader landing in the narrow interval between a concurrent process's exclusive create and completed write can use a different in-memory UUID for that run; later launches converge on the persisted value.
 - **No cross-home identity** — different `$DSH_HOME` values cannot be correlated.
-- **Configured DeepSeek gateways receive the id** — `dsh-llm-deepseek` sends the stable header to its resolved `baseURL`, including deployment overrides, independently of telemetry sharing mode.
+- **Configured DeepSeek gateways receive the id only when enabled** — `dsh-llm-deepseek` sends the stable header to its resolved `baseURL`, including deployment overrides, only when `sendAnonymousUserId` is `true` (default `false`).
 - **Deleting the file does not reset the current process** — memoization keeps the run's id until the next launch.
 
 <a id="dev-note"></a>

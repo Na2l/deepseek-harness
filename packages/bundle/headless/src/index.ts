@@ -330,6 +330,9 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
   }
 
   const selection = defaultModel.currentSelection()
+  if (selection === undefined) {
+    throw new Error('headless-runner: no default model is configured; set the agent-default-model provider/model or select a model')
+  }
   const agentOptions = { provider: selection.provider, model: selection.model }
   // This bundle composes no preset roster, so the model-facing rows sit in the
   // host plane and the agent reads them from the global layer. A deployment

@@ -472,14 +472,14 @@ describe('OpenTelemetrySessionBackend wire', () => {
     const defaultCtx = new Context()
     await defaultCtx.plugin(SessionStore)
     const defaulted = await defaultCtx.plugin(OpenTelemetrySessionBackend, { exporter: { url } })
-    expect(defaultCtx.sessionTelemetry.sharing).toBe('feedback-only')
+    expect(defaultCtx.sessionTelemetry.sharing).toBe('disabled')
     await defaulted.dispose()
 
     // No record was emitted by any mode, so nothing reached the collector.
     expect(captures).toEqual([])
   })
 
-  it('defaults direct construction to feedback-only delivery', async () => {
+  it('defaults direct construction to disabled delivery', async () => {
     const { url, captures } = await mockCollector()
     const ctx = new Context()
     try {
@@ -491,13 +491,10 @@ describe('OpenTelemetrySessionBackend wire', () => {
       const session = ctx.sessions.create(SessionId('direct-default'), { meta: {} })
       session.append('request/header', { header: { config: { provider: 'deepseek-official', model: 'mock' } }, reason: 'initial' })
       session.append('turn/start', { turn: 1 })
-      expect(captures).toEqual([])
       recordFeedback(session, { text: 'explicit report' })
-      const submitted = session.snapshotEvents().map(event => event.type)
-      await expect.poll(() => eventTypes(captures)).toEqual(submitted)
       session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
       await ctx.sessionTelemetry.shutdown()
-      expect(eventTypes(captures)).toEqual(submitted)
+      expect(captures).toEqual([])
     } finally {
       await ctx.fiber.dispose()
     }
@@ -755,12 +752,11 @@ describe('OpenTelemetrySessionBackend config fails loud', () => {
     expectTypeOf<SessionTelemetryMode.FEEDBACK_ONLY>().toExtend<SessionTelemetryMode>()
     expect(Object.values(SessionTelemetryMode)).toEqual(['FEEDBACK_ONLY', 'DISABLED'])
     expect(() => Config({ mode: 'FULL' } as unknown as Config)).toThrow()
-    expect(DEFAULT_TELEMETRY_MODE).toBe(SessionTelemetryMode.FEEDBACK_ONLY)
+    expect(DEFAULT_TELEMETRY_MODE).toBe(SessionTelemetryMode.DISABLED)
     expect(Config({}).mode).toBe(DEFAULT_TELEMETRY_MODE)
   })
 
   it.each([
-    [{}, /exporter\.url is required/],
     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY }, /exporter\.url is required/],
     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY, exporter: { url: '' } }, /exporter\.url is required/],
     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY, exporter: { url: 'not a url' } }, /not a valid URL/],

@@ -52,6 +52,12 @@ export interface Config {
   fileQuotaCleanupBatch: Volatile<number>
   /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
   retryPolicy: Volatile<RetryPolicyConfig | undefined>
+  /**
+   * Whether each authorized request carries the `x-deepseek-harness-user-id`
+   * header with the harness home's anonymous installation id. Defaults to
+   * `false`: no per-installation identifier is sent unless this is enabled.
+   */
+  sendAnonymousUserId: Volatile<boolean | undefined>
 }
 
 /** Plain options accepted by the provider resolver. */
@@ -98,6 +104,7 @@ export const deepSeekConfigFields = {
   fileRefreshMarginSeconds: z.number().step(1).min(0).default(DEFAULT_FILE_REFRESH_MARGIN_SECONDS).volatile(),
   fileQuotaCleanupBatch: z.number().step(1).min(1).max(1_000).default(DEFAULT_FILE_QUOTA_CLEANUP_BATCH).volatile(),
   retryPolicy: RetryPolicySchema.volatile(),
+  sendAnonymousUserId: z.boolean().volatile(),
 }
 
 export const Config = z.object(deepSeekConfigFields)
@@ -315,5 +322,6 @@ export function resolveAdapterOptions(config: Options, environment?: LaunchEnvir
       quotaCleanupBatch: fileQuotaCleanupBatch,
     },
     retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-deepseek: retryPolicy'),
+    sendAnonymousUserId: config.sendAnonymousUserId ?? false,
   }
 }

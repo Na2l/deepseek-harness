@@ -266,7 +266,7 @@ export class SessionCommandController {
     const childId = brandString<SessionId>(`session-${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
     try {
-      const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
+      const defaultSelection = this.ctx.agentDefaultModel.currentSelection()
       await this.ctx.agents.create({
         sessionId: childId,
         seed,
@@ -279,7 +279,9 @@ export class SessionCommandController {
             ? {}
             : { agentPreset: composition.agentPreset }),
         },
-        agentOptions: { provider, model },
+        agentOptions: defaultSelection === undefined
+          ? {}
+          : { provider: defaultSelection.provider, model: defaultSelection.model },
         setup: composition.setup,
       })
     } catch (error) {
@@ -328,6 +330,14 @@ export class SessionCommandController {
     }
     const agent = await this.resolveAgent(request.sessionId)
     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+    const selection = this.agents.selectionFor(agent).current
+    if (selection === undefined) {
+      throw new RemoteError(
+        'session/model-unavailable',
+        'no model is selected for this session; select a model before sending',
+        { provider: '', model: '' },
+      )
+    }
     const source: MessageSource = {
       kind: 'user',
       rpcId: request.requestId,
@@ -338,6 +348,13 @@ export class SessionCommandController {
       try {
         if (hasImage) {
           const current = this.agents.selectionFor(agent).current
+          if (current === undefined) {
+            throw new RemoteError(
+              'session/model-unavailable',
+              'no model is selected for this session; select a model before sending',
+              { provider: '', model: '' },
+            )
+          }
           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
             throw new RemoteError(

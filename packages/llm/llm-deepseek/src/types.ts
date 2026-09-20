@@ -79,6 +79,8 @@ export interface DeepSeekConnectionOptions {
   filePolicy: DeepSeekFilePolicy
   /** Provider-owned model-request retry policy, already resolved. */
   retryPolicy: ResolvedRetryPolicy
+  /** Whether requests carry the anonymous `x-deepseek-harness-user-id` header. */
+  sendAnonymousUserId: boolean
 }
 
 /** Authentication captured by the provider for one request and its file operations. */
@@ -103,8 +105,8 @@ export interface DeepSeekAdapterOptions<Connection extends DeepSeekConnectionOpt
   options: () => Connection
   /** Resolve authentication from this request's connection snapshot; never re-read the endpoint. */
   resolveAuth: (connection: Connection) => Promise<DeepSeekRequestAuth>
-  /** Resolve the harness-home anonymous id shared with telemetry and feedback. */
-  resolveUserId: () => AnonymousUserId
+  /** Resolve the harness-home anonymous id shared with telemetry and feedback; `undefined` omits the header. */
+  resolveUserId: () => AnonymousUserId | undefined
   /** Resolve the current durable attachment service; absence rejects image input. */
   resolveAttachments?: () => AttachmentStore | undefined
   /** Bridge one attachment reference into the current model-tool execution world. */

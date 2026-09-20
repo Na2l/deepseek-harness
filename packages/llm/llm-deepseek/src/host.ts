@@ -22,7 +22,12 @@ export function registerDeepSeekProvider<C extends DeepSeekConnectionOptions>(
   let userId: AnonymousUserId | undefined
   const adapter = new DeepSeekAdapter({
     ...dependencies,
-    resolveUserId: () => userId ??= getOrCreateAnonymousUserId(),
+    // Only mint (and therefore persist) the anonymous id when a deployment
+    // opts in to sending it; disabled is the default and leaves no file behind.
+    resolveUserId: () => {
+      if (!dependencies.options().sendAnonymousUserId) return undefined
+      return userId ??= getOrCreateAnonymousUserId()
+    },
     onReplayDegrade: ({ provider, model, reason }) => {
       ctx.logger.warn(`llm-deepseek: unusable Messages replay state on assistant history for route "${provider}/${model}"; sending provider-neutral content (${reason})`)
     },
