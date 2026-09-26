@@ -42,6 +42,7 @@
     "@deepseek-ai/dsh-attachment-local": "workspace:*",
     "@deepseek-ai/dsh-shell-env": "workspace:*",
     "@deepseek-ai/dsh-bash-sandbox": "workspace:*",
+    "@deepseek-ai/dsh-browser-use": "workspace:*",
     "@deepseek-ai/dsh-command-compact": "workspace:*",
     "@deepseek-ai/dsh-command-feedback": "workspace:*",
     "@deepseek-ai/dsh-command-goal": "workspace:*",
@@ -120,6 +121,7 @@
     "@deepseek-ai/dsh-plugin-manager": "workspace:*",
     "@deepseek-ai/dsh-authorization": "workspace:*",
     "@deepseek-ai/dsh-deepseek-account-platform": "workspace:*",
+    "@deepseek-ai/dsh-experimental-browser-use-playwright-mcp": "workspace:*",
     "@deepseek-ai/dsh-config-editor": "workspace:*",
     "@deepseek-ai/dsh-settings": "workspace:*"
   },

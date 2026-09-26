@@ -1911,6 +1911,9 @@ importers:
       '@deepseek-ai/dsh-bash-sandbox':
         specifier: workspace:*
         version: link:../../shell/bash-sandbox
+      '@deepseek-ai/dsh-browser-use':
+        specifier: workspace:*
+        version: link:../../browser-use/browser-use
       '@deepseek-ai/dsh-command-compact':
         specifier: workspace:*
         version: link:../../compaction/command-compact
@@ -1941,6 +1944,9 @@ importers:
       '@deepseek-ai/dsh-deepseek-account-platform':
         specifier: workspace:*
         version: link:../../credentials/deepseek-account-platform
+      '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp':
+        specifier: workspace:*
+        version: link:../../experimental/browser-use-playwright-mcp
       '@deepseek-ai/dsh-fs-local':
         specifier: workspace:*
         version: link:../../fs/fs-local

@@ -477,6 +477,19 @@
     - id: mcp-resources
       name: '@deepseek-ai/dsh-mcp-resources'
 
+    # Browser automation through Playwright MCP: launch a headless Chromium and
+    # expose its upstream tools per Session. One browser provider at a time; a
+    # deployment without a discovered Chromium sets `executablePath` (or
+    # `disabled: true`) in a later patch layer.
+    - id: browser-use
+      name: '@deepseek-ai/dsh-browser-use'
+
+    - id: browser-use-playwright-mcp
+      name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+      config:
+        mode: launch
+        headless: true
+
     # ── rows every mode mounts, whose values each overlay may state ──────────────
 
     # The tool registry. Presentation mode is a deployment choice; omitting it here
