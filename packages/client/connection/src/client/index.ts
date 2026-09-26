@@ -9,7 +9,7 @@ import {
   type ConnectionState,
 } from './connection.ts'
 import { createWebConnectionRpc, type RpcFetch, type RpcStreamOpen } from './rpc.ts'
-import { isLoopbackHostname } from '../loopback-hostname.ts'
+import { isTrustedPageAuthority } from '../authority.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
 import { resolveConnectionConfig } from '../recovery-config.ts'
 
@@ -110,11 +110,14 @@ export interface ClientTransportHooks {
 interface ClientTransportGlobal {
   __DSH_TRANSPORT__?: ClientTransportHooks
   __DSH_CONNECTION_RECOVERY__?: unknown
+  __DSH_TRUSTED_HOSTS__?: unknown
 }
 
 /** Browser location fields used to classify loopback authority. */
 export interface ConnectionLocation {
   readonly hostname: string
+  /** Port string; '' for the scheme default. */
+  readonly port?: string
 }
 
 /** Instance-local inputs for installing a Connection service. */
@@ -125,6 +128,8 @@ export interface ConnectionInstallOptions {
   readonly recovery?: ConnectionRecoveryConfig
   /** Page location; omit for a non-browser composition. */
   readonly location?: ConnectionLocation
+  /** Deployment authorities accepted by the Host/Origin fence, injected at boot. */
+  readonly trustedHosts?: readonly string[]
 }
 
 /**
@@ -134,8 +139,10 @@ export interface ConnectionInstallOptions {
 export interface ConnectionHandle {
   /**
    * Whether the privileged surface is reachable: the page authority is
-   * loopback, the transport declares the page owns the Host
-   * ({@link ClientTransportHooks.ownsHost}), or the context is not a browser.
+   * loopback or a declared trusted host, the transport declares the page owns
+   * the Host ({@link ClientTransportHooks.ownsHost}), or the context is not a
+   * browser. Trusted hosts are fixed at boot, so this is stable for the page
+   * lifetime.
    */
   readonly isLoopback: boolean
   /** Current Remote event generation and the Host facts carried by its opening frame. */
@@ -206,6 +213,7 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   const pageLocation = options.location
   const transport = options.transport
   const recovery = options.recovery ?? {}
+  const trustedHosts = options.trustedHosts ?? []
   const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
   let generationSource: ConnectionGenerationSource | undefined
   let owner: ConnectionOwner | undefined
@@ -245,7 +253,8 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
     publishState(undefined)
   }
   const handle: ConnectionHandle = {
-    isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    isLoopback: transport?.ownsHost === true || pageLocation === undefined
+      || isTrustedPageAuthority(pageLocation.hostname, pageLocation.port ?? '', trustedHosts),
     generation: {
       getSnapshot: () => generation,
       subscribe: (listener) => {
@@ -318,9 +327,13 @@ export function apply(ctx: Context): void {
   const globals = globalThis as ClientTransportGlobal
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const transport = globals.__DSH_TRANSPORT__
+  const trustedHosts = Array.isArray(globals.__DSH_TRUSTED_HOSTS__)
+    ? globals.__DSH_TRUSTED_HOSTS__.filter((entry): entry is string => typeof entry === 'string')
+    : []
   installConnection(ctx, {
     ...(transport === undefined ? {} : { transport }),
     recovery: resolveConnectionConfig(globals.__DSH_CONNECTION_RECOVERY__),
     ...(pageLocation === undefined ? {} : { location: pageLocation }),
+    trustedHosts,
   })
 }
