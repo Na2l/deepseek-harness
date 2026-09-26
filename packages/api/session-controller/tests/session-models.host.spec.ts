@@ -395,7 +395,7 @@ describe('Web session model selection', () => {
     }])
     await ctx.agentDefaultModel.saveSelection({ provider: 'removed', model: 'saved' })
     const controller = createSessionTestController(ctx, {
-      defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(), cwd: '/tmp',
+      defaultModelSelection: () => ctx.agentDefaultModel.currentSelection()!, cwd: '/tmp',
     })
     await controller.initializeDefaultModel()
     expect(describe).toHaveBeenCalledWith('CUSTOM_API_KEY')
@@ -888,7 +888,7 @@ it('initializes the account model without reasoning metadata and rejects an empt
     { provider: 'deepseek-account', id: 'basic', name: 'Basic' },
   ]))
   const controller = createSessionTestController(ctx, {
-    defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(), cwd: '/tmp',
+    defaultModelSelection: () => ctx.agentDefaultModel.currentSelection()!, cwd: '/tmp',
   })
   await controller.initializeDefaultModel()
   expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'deepseek-account', model: 'basic' })

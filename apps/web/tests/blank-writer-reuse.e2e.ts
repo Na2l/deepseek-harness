@@ -20,10 +20,11 @@ describe.each([false, true])('web e2e: selected blank writer held: %s', (held) =
     scaffold = await launchWebScaffold({})
     const workspace = await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd)
     for (const sessionId of [HELD, FREE]) {
+      const selection = scaffold.ctx.agentDefaultModel.currentSelection()
       const handle = await scaffold.ctx.agents.create({
         sessionId,
         meta: { cwd: scaffold.workspaceCwd },
-        agentOptions: scaffold.ctx.agentDefaultModel.currentSelection(),
+        ...selection === undefined ? {} : { agentOptions: selection },
       })
       try {
         handle.agent.session.append('plan/mode', { active: true })
