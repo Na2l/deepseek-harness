@@ -1,0 +1,2427 @@
+diff --git a/apps/web/tests/deepseek-messages-settings.e2e.ts b/apps/web/tests/deepseek-messages-settings.e2e.ts
+deleted file mode 100644
+index 32fd2a613e..0000000000
+--- a/apps/web/tests/deepseek-messages-settings.e2e.ts
++++ /dev/null
+@@ -1,103 +0,0 @@
+-/** Opt-in Web Messages configuration, credential reuse, and recovery from a saved Chat Completions selection. */
+-import { readFile } from 'node:fs/promises'
+-import { join } from 'node:path'
+-import { fileURLToPath } from 'node:url'
+-import { chromium, type Browser, type Page } from 'playwright'
+-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+-import {
+-  captureStableAria, compareOrRefreshGolden, launchWebScaffold,
+-  watchConsole, webSnapshotMode, type WebScaffold,
+-} from './scaffold.ts'
+-import { connectFreshWorkspaceZh, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
+-
+-const EXPECTED = fileURLToPath(new URL('./expected/deepseek-messages-settings/', import.meta.url))
+-
+-describe.skipIf(webSnapshotMode() === 'record')('web e2e: DeepSeek Messages opt-in', () => {
+-  let scaffold: WebScaffold
+-  let browser: Browser
+-  let page: Page
+-  let tripwire: ReturnType<typeof watchConsole>
+-
+-  beforeAll(async () => {
+-    scaffold = await launchWebScaffold({ deepSeekMissingCredential: true, deepSeekMessages: true })
+-    browser = await chromium.launch()
+-    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+-    tripwire = watchConsole(page)
+-    await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+-  }, 120_000)
+-
+-  afterAll(async () => {
+-    try {
+-      await browser?.close()
+-    } finally {
+-      await scaffold?.close()
+-    }
+-  })
+-
+-  it('offers one DeepSeek card and saves Messages settings using the existing credential reference', async () => {
+-    onTestFailed(() => saveFailureShot(page, 'web-e2e-deepseek-messages-settings'))
+-    expect(scaffold.ctx.llm.listProviders()).toContainEqual({ id: 'deepseek-official', name: 'DeepSeek' })
+-    expect(scaffold.ctx.llm.listProviders().filter(provider => provider.id === 'deepseek-official')).toHaveLength(1)
+-    expect(scaffold.ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+-    const onboarding = page.getByRole('dialog', { name: '添加一个 API Key 开始使用' })
+-    await onboarding.getByLabel('API 密钥', { exact: true }).fill('sk-messages-onboarding')
+-    await onboarding.getByRole('button', { name: '保存并继续' }).click()
+-    await onboarding.waitFor({ state: 'detached' })
+-    await page.getByRole('button', { name: '设置', exact: true }).click()
+-    const dialog = page.getByRole('dialog', { name: '设置', exact: true })
+-    await dialog.getByRole('button', { name: '模型', exact: true }).click()
+-    await dialog.getByText('DeepSeek', { exact: true }).waitFor()
+-    expect(await dialog.getByText('DeepSeek', { exact: true }).count()).toBe(1)
+-    await dialog.getByText('DeepSeek', { exact: true }).locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+-    const messages = dialog
+-    await messages.getByText('自定义设置', { exact: true }).click()
+-    expect(await messages.getByLabel('API 地址', { exact: true }).getAttribute('placeholder'))
+-      .toBe('https://api.deepseek.com/anthropic')
+-    await compareOrRefreshGolden(join(EXPECTED, 'cards.expected.md'),
+-      await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), webSnapshotMode())
+-    await messages.getByLabel('API 密钥', { exact: true }).fill('sk-e2e-messages')
+-    await messages.getByLabel('API 地址', { exact: true }).fill('https://messages.example/anthropic')
+-    expect(await messages.getByLabel('模型 ID 1').inputValue()).toBe('deepseek-flash')
+-    await messages.getByLabel('显示名称 1', { exact: true }).fill('Messages Flash')
+-    await messages.getByRole('button', { name: '保存', exact: true }).click()
+-    await dialog.getByText('已保存 DeepSeek (deepseek-official)。', { exact: true }).waitFor()
+-
+-    const settings = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+-    expect(settings).toContain('https://messages.example/anthropic')
+-    expect(settings).toContain('llm-deepseek:')
+-    await expect(scaffold.ctx.llm.resolveModelInfo('deepseek-official', 'deepseek-flash')).resolves.toMatchObject({
+-      name: 'Messages Flash', inputModalities: ['text', 'image'], systemPromptUpdate: 'in-history',
+-    })
+-    expect(scaffold.ctx.settings.get('llm-deepseek')).toMatchObject({ protocol: 'messages' })
+-    expect(settings).not.toContain('sk-e2e-')
+-    const credentials = await readFile(join(scaffold.harnessHome, '.credentials.yaml'), 'utf8')
+-    expect(credentials).toContain('DEEPSEEK_API_KEY: sk-e2e-messages')
+-    expect(credentials).not.toContain('DEEPSEEK_MESSAGES_API_KEY')
+-    expect(await page.locator('body').innerText()).not.toContain('sk-e2e-')
+-    await page.keyboard.press('Escape')
+-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'messages-settings-e2e')
+-    await page.getByRole('button', { name: /^选择模型/ }).click()
+-    await page.getByRole('menuitem', { name: /模型/ }).click()
+-    await page.getByRole('menuitemradio', { name: 'Messages Flash', exact: true }).waitFor()
+-    await compareOrRefreshGolden(join(EXPECTED, 'picker.expected.md'),
+-      await captureStableAria(page, '[role="menu"]', scaffold.workspaceCwd), webSnapshotMode())
+-    expect(tripwire.pageErrors).toEqual([])
+-  }, 60_000)
+-
+-  it('keeps a saved Chat Completions selection available after the YAML protocol switch', async () => {
+-    onTestFailed(() => saveFailureShot(page, 'web-e2e-deepseek-messages-default'))
+-    await page.keyboard.press('Escape')
+-    await scaffold.ctx.agentDefaultModel.saveSelection({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+-    await page.reload({ waitUntil: 'load' })
+-    const input = page.locator('[data-composer-input]').first()
+-    await expect.poll(() => input.isEnabled()).toBe(true)
+-    await page.getByRole('button', { name: /^选择模型/ }).click()
+-    await page.getByRole('menuitem', { name: /模型/ }).click()
+-    await page.getByRole('menuitemradio', { name: 'Messages Flash', exact: true }).click()
+-    await expect.poll(() => input.isEnabled()).toBe(true)
+-    await expect.poll(() => scaffold.ctx.agentDefaultModel.currentSelection().provider).toBe('deepseek-official')
+-    const settings = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+-    expect(settings).toContain('provider: deepseek-official')
+-    expect(tripwire.pageErrors).toEqual([])
+-  }, 60_000)
+-})
+diff --git a/apps/web/tests/expected/deepseek-messages-settings/cards.expected.md b/apps/web/tests/expected/deepseek-messages-settings/cards.expected.md
+deleted file mode 100644
+index 15732b9c03..0000000000
+--- a/apps/web/tests/expected/deepseek-messages-settings/cards.expected.md
++++ /dev/null
+@@ -1,70 +0,0 @@
+-- dialog "设置":
+-  - navigation:
+-    - text: 设置
+-    - button "通用设置":
+-      - img
+-      - text: 通用设置
+-    - button "模型":
+-      - img
+-      - text: 模型
+-    - button "内置插件":
+-      - img
+-      - text: 内置插件
+-    - button "Agent 预设":
+-      - img
+-      - text: Agent 预设
+-    - button "已归档会话":
+-      - img
+-      - text: 已归档会话
+-  - button "打开配置文件"
+-  - button "关闭":
+-    - img
+-    - text: 关闭
+-  - heading "模型" [level=2]
+-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+-  - list:
+-    - listitem:
+-      - text: DeepSeek
+-      - img "API 密钥已配置"
+-      - button "编辑 DeepSeek (deepseek-official)": 编辑
+-      - text: DeepSeek deepseek-official API 密钥
+-      - textbox "API 密钥":
+-        - /placeholder: 已配置——输入新值可替换
+-      - group:
+-        - text: 自定义设置 API 地址
+-        - textbox "API 地址":
+-          - /placeholder: https://api.deepseek.com/anthropic
+-        - text: 请填写与当前连接配置兼容的 API 地址。
+-        - region "模型目录":
+-          - text: 模型目录 正在使用适配器默认模型
+-          - textbox "模型 ID 1":
+-            - /placeholder: 模型 ID
+-            - text: deepseek-flash
+-          - textbox "显示名称 1":
+-            - /placeholder: 显示名称
+-            - text: DeepSeek-V41-Flash
+-          - button "模型选项 1":
+-            - img
+-          - button "删除模型 1":
+-            - img
+-          - textbox "模型 ID 2":
+-            - /placeholder: 模型 ID
+-            - text: deepseek-v4-pro
+-          - textbox "显示名称 2":
+-            - /placeholder: 显示名称
+-            - text: DeepSeek-V4-Pro
+-          - button "模型选项 2":
+-            - img
+-          - button "删除模型 2":
+-            - img
+-          - button "添加模型":
+-            - img
+-            - text: 添加模型
+-      - button "取消"
+-      - button "保存"
+-  - button "添加提供方":
+-    - img
+-    - text: 添加提供方
+-  - button "添加自定义提供方":
+-    - img
+-    - text: 添加自定义提供方
+diff --git a/apps/web/tests/expected/deepseek-messages-settings/picker.expected.md b/apps/web/tests/expected/deepseek-messages-settings/picker.expected.md
+deleted file mode 100644
+index bee6603b9b..0000000000
+--- a/apps/web/tests/expected/deepseek-messages-settings/picker.expected.md
++++ /dev/null
+@@ -1,7 +0,0 @@
+-- menu "模型与推理等级":
+-  - group "DeepSeek":
+-    - text: DeepSeek
+-    - menuitemradio "Messages Flash" [checked]:
+-      - text: Messages Flash
+-      - img
+-    - menuitemradio "DeepSeek-V4-Pro"
+diff --git a/apps/web/tests/expected/onboarding-deepseek-config/default-models.expected.md b/apps/web/tests/expected/onboarding-deepseek-config/default-models.expected.md
+deleted file mode 100644
+index db14de42a9..0000000000
+--- a/apps/web/tests/expected/onboarding-deepseek-config/default-models.expected.md
++++ /dev/null
+@@ -1,83 +0,0 @@
+-- dialog "设置":
+-  - navigation:
+-    - text: 设置
+-    - button "通用设置":
+-      - img
+-      - text: 通用设置
+-    - button "模型":
+-      - img
+-      - text: 模型
+-    - button "内置插件":
+-      - img
+-      - text: 内置插件
+-    - button "Agent 预设":
+-      - img
+-      - text: Agent 预设
+-    - button "已归档会话":
+-      - img
+-      - text: 已归档会话
+-  - button "打开配置文件"
+-  - button "关闭":
+-    - img
+-    - text: 关闭
+-  - heading "模型" [level=2]
+-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+-  - list:
+-    - listitem:
+-      - text: DeepSeek
+-      - img "API 密钥已配置"
+-      - button "编辑 DeepSeek (deepseek-official)": 编辑
+-      - text: DeepSeek deepseek-official API 密钥
+-      - textbox "API 密钥":
+-        - /placeholder: 已配置——输入新值可替换
+-      - group:
+-        - text: 自定义设置 API 地址
+-        - textbox "API 地址":
+-          - /placeholder: https://api.deepseek.com/anthropic
+-        - text: 请填写与当前连接配置兼容的 API 地址。
+-        - region "模型目录":
+-          - text: 模型目录 正在使用适配器默认模型
+-          - textbox "模型 ID 1":
+-            - /placeholder: 模型 ID
+-            - text: deepseek-flash
+-          - textbox "显示名称 1":
+-            - /placeholder: 显示名称
+-            - text: DeepSeek-V41-Flash
+-          - button "模型选项 1" [expanded]:
+-            - img
+-          - button "删除模型 1":
+-            - img
+-          - text: 上下文窗口
+-          - textbox "上下文窗口 1":
+-            - /placeholder: 1M
+-            - text: 1M
+-          - text: 最大输出 token 数
+-          - textbox "最大输出 token 数 1":
+-            - /placeholder: 256K
+-          - group "输入类型 1":
+-            - text: 输入类型
+-            - checkbox "文本" [checked]
+-            - text: 文本
+-            - checkbox "图片" [checked]
+-            - text: 图片
+-          - textbox "模型 ID 2":
+-            - /placeholder: 模型 ID
+-            - text: deepseek-v4-pro
+-          - textbox "显示名称 2":
+-            - /placeholder: 显示名称
+-            - text: DeepSeek-V4-Pro
+-          - button "模型选项 2":
+-            - img
+-          - button "删除模型 2":
+-            - img
+-          - button "添加模型":
+-            - img
+-            - text: 添加模型
+-      - button "取消"
+-      - button "保存"
+-  - button "添加提供方":
+-    - img
+-    - text: 添加提供方
+-  - button "添加自定义提供方":
+-    - img
+-    - text: 添加自定义提供方
+diff --git a/apps/web/tests/expected/onboarding-deepseek-config/missing.expected.md b/apps/web/tests/expected/onboarding-deepseek-config/missing.expected.md
+deleted file mode 100644
+index d42cf40681..0000000000
+--- a/apps/web/tests/expected/onboarding-deepseek-config/missing.expected.md
++++ /dev/null
+@@ -1,8 +0,0 @@
+-- dialog "添加一个 API Key 开始使用":
+-  - heading "添加一个 API Key 开始使用" [level=2]
+-  - paragraph: 配置 DeepSeek 官方模型，即可开始使用。
+-  - text: API 密钥
+-  - textbox "API 密钥":
+-    - /placeholder: 输入 API 密钥
+-  - button "稍后配置"
+-  - button "保存并继续" [disabled]
+diff --git a/apps/web/tests/expected/onboarding-deepseek-config/models.expected.md b/apps/web/tests/expected/onboarding-deepseek-config/models.expected.md
+deleted file mode 100644
+index 6ce0338ab8..0000000000
+--- a/apps/web/tests/expected/onboarding-deepseek-config/models.expected.md
++++ /dev/null
+@@ -1,75 +0,0 @@
+-- dialog "设置":
+-  - navigation:
+-    - text: 设置
+-    - button "通用设置":
+-      - img
+-      - text: 通用设置
+-    - button "模型":
+-      - img
+-      - text: 模型
+-    - button "内置插件":
+-      - img
+-      - text: 内置插件
+-    - button "Agent 预设":
+-      - img
+-      - text: Agent 预设
+-    - button "已归档会话":
+-      - img
+-      - text: 已归档会话
+-  - button "打开配置文件"
+-  - button "关闭":
+-    - img
+-    - text: 关闭
+-  - heading "模型" [level=2]
+-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+-  - list:
+-    - listitem:
+-      - text: DeepSeek
+-      - img "API 密钥已配置"
+-      - button "编辑 DeepSeek (deepseek-official)": 编辑
+-      - text: DeepSeek deepseek-official API 密钥
+-      - textbox "API 密钥":
+-        - /placeholder: 已配置——输入新值可替换
+-      - group:
+-        - text: 自定义设置 API 地址
+-        - textbox "API 地址":
+-          - /placeholder: https://api.deepseek.com/anthropic
+-        - text: 请填写与当前连接配置兼容的 API 地址。
+-        - region "模型目录":
+-          - text: 模型目录 已自定义模型目录
+-          - button "恢复默认模型"
+-          - textbox "模型 ID 1":
+-            - /placeholder: 模型 ID
+-            - text: private-preview
+-          - textbox "显示名称 1":
+-            - /placeholder: 显示名称
+-            - text: Private Preview
+-          - button "模型选项 1" [expanded]:
+-            - img
+-          - button "删除模型 1":
+-            - img
+-          - text: 上下文窗口
+-          - textbox "上下文窗口 1":
+-            - /placeholder: 1M
+-            - text: "131072"
+-          - text: 最大输出 token 数
+-          - textbox "最大输出 token 数 1":
+-            - /placeholder: 256K
+-            - text: 64K
+-          - group "输入类型 1":
+-            - text: 输入类型
+-            - checkbox "文本" [checked]
+-            - text: 文本
+-            - checkbox "图片" [checked]
+-            - text: 图片
+-          - button "添加模型":
+-            - img
+-            - text: 添加模型
+-      - button "取消"
+-      - button "保存"
+-  - button "添加提供方":
+-    - img
+-    - text: 添加提供方
+-  - button "添加自定义提供方":
+-    - img
+-    - text: 添加自定义提供方
+diff --git a/apps/web/tests/expected/onboarding-deepseek-config/welcome.expected.md b/apps/web/tests/expected/onboarding-deepseek-config/welcome.expected.md
+deleted file mode 100644
+index de65e02fc7..0000000000
+--- a/apps/web/tests/expected/onboarding-deepseek-config/welcome.expected.md
++++ /dev/null
+@@ -1,5 +0,0 @@
+-- dialog "内测声明":
+-  - heading "内测声明" [level=2]
+-  - paragraph: DeepSeek Harness 目前的 0.1 版本仍处在面向 Harness 开发者进行测试的阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者的反馈建议。预计 DeepSeek Harness 的核心插件以及基础 API 都会在接下来的一段时间内快速迭代、持续演化。
+-  - paragraph: 我们期待与全球开发者一起，在开源、开放、可复用、可组合的基础设施之上，共同探索智能上限。欢迎全球 Harness 开发者加入 DSH 插件生态。
+-  - button "继续"
+diff --git a/apps/web/tests/onboarding-deepseek-config.e2e.ts b/apps/web/tests/onboarding-deepseek-config.e2e.ts
+deleted file mode 100644
+index 96ddb5e24c..0000000000
+--- a/apps/web/tests/onboarding-deepseek-config.e2e.ts
++++ /dev/null
+@@ -1,291 +0,0 @@
+-// Keyless browser e2e: the shipped DeepSeek adapter stays mounted while its
+-// credential is absent, both ordered steps share the shipped modal chrome,
+-// and the inline key write lands in an isolated harness home without a reload
+-// or model call.
+-import { randomBytes } from 'node:crypto'
+-import { assertModelInputLayout } from './model-input-layout.ts'
+-import { readFile } from 'node:fs/promises'
+-import { fileURLToPath } from 'node:url'
+-import { join } from 'node:path'
+-import type { Browser, Page } from 'playwright'
+-import { chromium } from 'playwright'
+-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+-import {
+-  acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
+-  launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
+-  WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_COPY, WELCOME_NOTICE_SETTINGS_NAMESPACE,
+-  WELCOME_NOTICE_VERSION,
+-} from './scaffold.ts'
+-import { ZH_BROWSER_LOCALE, connectFreshWorkspaceZh, saveFailureShot } from './support.ts'
+-
+-const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/onboarding-deepseek-config', import.meta.url))
+-const WELCOME_EXPECTED = join(SNAPSHOT_DIR, 'welcome.expected.md')
+-const MISSING_EXPECTED = join(SNAPSHOT_DIR, 'missing.expected.md')
+-const MODELS_EXPECTED = join(SNAPSHOT_DIR, 'models.expected.md')
+-const DEFAULT_MODELS_EXPECTED = join(SNAPSHOT_DIR, 'default-models.expected.md')
+-const MODE = webSnapshotMode()
+-
+-describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup', () => {
+-  let scaffold: WebScaffold
+-  let browser: Browser
+-  let page: Page
+-  let tripwire: ReturnType<typeof watchConsole>
+-  const browserConsole: string[] = []
+-
+-  beforeAll(async () => {
+-    scaffold = await launchWebScaffold({ deepSeekMissingCredential: true, welcomeNoticePending: true })
+-    browser = await chromium.launch()
+-    // The scenario asserts the shipped Chinese copy, so the browser asks for it.
+-    page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: ZH_BROWSER_LOCALE })
+-    tripwire = watchConsole(page)
+-    page.on('console', message => browserConsole.push(message.text()))
+-    await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+-    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+-  }, 120_000)
+-
+-  afterAll(async () => {
+-    await browser?.close()
+-    await scaffold?.close()
+-  })
+-
+-  it('stores a key write-only and observes configured state without restarting', async () => {
+-    onTestFailed(() => saveFailureShot(page, 'web-e2e-onboarding-deepseek-config'))
+-    const welcome = page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.zh.title })
+-    await welcome.waitFor({ timeout: 15_000 })
+-    expect(await page.locator('#root').evaluate(root => (root as HTMLElement).inert)).toBe(true)
+-    for (const paragraph of WELCOME_NOTICE_COPY.zh.body.split('\n\n')) {
+-      expect(await welcome.getByText(paragraph, { exact: true }).count()).toBe(1)
+-    }
+-    expect(await welcome.getByRole('button').allTextContents()).toEqual([
+-      WELCOME_NOTICE_COPY.zh.continueLabel,
+-    ])
+-    const welcomeAria = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+-    await compareOrRefreshGolden(WELCOME_EXPECTED, welcomeAria, MODE)
+-
+-    // Observation is not acknowledgement: the exact version is persisted
+-    // only by the explicit action, so a reload still presents this dialog.
+-    const firstReloadWarnings = tripwire.warnings.length
+-    await page.reload({ waitUntil: 'load' })
+-    acknowledgeReloadConnectionLoss(tripwire, firstReloadWarnings)
+-    await welcome.waitFor({ timeout: 15_000 })
+-
+-    await welcome.getByRole('button', { name: WELCOME_NOTICE_COPY.zh.continueLabel }).click()
+-    await welcome.waitFor({ state: 'detached', timeout: 15_000 })
+-
+-    const credentialStep = page.getByRole('dialog', { name: '添加一个 API Key 开始使用' })
+-    await credentialStep.waitFor({ timeout: 15_000 })
+-    const keyInput = credentialStep.getByLabel('API 密钥', { exact: true })
+-    await keyInput.waitFor({ timeout: 10_000 })
+-    const initial = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+-    await compareOrRefreshGolden(MISSING_EXPECTED, initial, MODE)
+-
+-    const secret = `dsh_onboarding_${randomBytes(12).toString('hex')}`
+-    await keyInput.fill(secret)
+-    await credentialStep.getByRole('button', { name: '保存并继续' }).click()
+-    await credentialStep.waitFor({ state: 'detached', timeout: 15_000 })
+-    expect(await page.locator('#root').evaluate(root => (root as HTMLElement).inert)).toBe(false)
+-
+-    const stored = await readFile(join(scaffold.harnessHome, '.credentials.yaml'), 'utf8')
+-    expect(stored.includes(`DEEPSEEK_API_KEY: ${secret}`)).toBe(true)
+-    expect((await page.content()).includes(secret)).toBe(false)
+-    expect((await page.locator('body').ariaSnapshot()).includes(secret)).toBe(false)
+-    expect(browserConsole.some(line => line.includes(secret))).toBe(false)
+-
+-    const acknowledgedSettings = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+-    expect(acknowledgedSettings).toContain(`${WELCOME_NOTICE_ACK_FIELD}: ${WELCOME_NOTICE_VERSION}`)
+-
+-    // The ordinary Models surface reuses the refreshed join and exposes the
+-    // configured write-only placeholder without a reload.
+-    await page.getByRole('button', { name: '设置', exact: true }).click()
+-    const settings = page.getByRole('dialog', { name: '设置' })
+-    await settings.waitFor({ timeout: 10_000 })
+-    await settings.getByRole('button', { name: '模型' }).click()
+-    const deepSeekRow = settings.getByText('DeepSeek', { exact: true }).first()
+-    await deepSeekRow.waitFor({ timeout: 10_000 })
+-    await deepSeekRow.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+-    const configuredInput = settings.getByLabel('API 密钥', { exact: true })
+-    await configuredInput.waitFor({ timeout: 10_000 })
+-    await expect.poll(
+-      () => configuredInput.getAttribute('placeholder'),
+-      { timeout: 10_000 },
+-    ).toBe('已配置——输入新值可替换')
+-
+-    const secondReloadWarnings = tripwire.warnings.length
+-    await page.reload({ waitUntil: 'load' })
+-    acknowledgeReloadConnectionLoss(tripwire, secondReloadWarnings)
+-    await page.waitForSelector('[class*="frame"]', { timeout: 15_000 })
+-    expect(await page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.zh.title }).count()).toBe(0)
+-    expect(await page.getByRole('dialog', { name: '添加一个 API Key 开始使用' }).count()).toBe(0)
+-
+-    // An old acknowledgement means materially revised copy: welcome returns,
+-    // while the already-configured provider step remains complete.
+-    await scaffold.ctx.settings.mutate(WELCOME_NOTICE_SETTINGS_NAMESPACE, [{
+-      op: 'set', path: [WELCOME_NOTICE_ACK_FIELD], value: 'previous-copy-version',
+-    }])
+-    const thirdReloadWarnings = tripwire.warnings.length
+-    await page.reload({ waitUntil: 'load' })
+-    acknowledgeReloadConnectionLoss(tripwire, thirdReloadWarnings)
+-    await welcome.waitFor({ timeout: 15_000 })
+-    await welcome.getByRole('button', { name: WELCOME_NOTICE_COPY.zh.continueLabel }).click()
+-    await welcome.waitFor({ state: 'detached', timeout: 15_000 })
+-    expect(await page.getByRole('dialog', { name: '添加一个 API Key 开始使用' }).count()).toBe(0)
+-
+-    expect((await page.content()).includes(secret)).toBe(false)
+-    expect((await page.locator('body').ariaSnapshot()).includes(secret)).toBe(false)
+-    expect(browserConsole.some(line => line.includes(secret))).toBe(false)
+-    expect(tripwire.warnings).toEqual([])
+-    expect(tripwire.pageErrors).toEqual([])
+-  }, 60_000)
+-
+-  it('never paints the takeover chrome on a configured reload, even with the settings join held open', async () => {
+-    onTestFailed(() => saveFailureShot(page, 'web-e2e-onboarding-configured-reload'))
+-    // Regression pin for the reload flash: both steps are satisfied, yet each
+-    // must load private facts before deciding not to show. Dialog chrome lives
+-    // inside each visible branch, so the deciding window paints and blocks
+-    // nothing. Holding settings/describe widens that window from loopback
+-    // RTT scale to a deterministic hundreds of milliseconds, removing all
+-    // timing dependence from the sampler assertions below.
+-    //
+-    // The sampler init script persists across this shared page's later
+-    // navigations (init scripts re-run per navigation); that stays harmless
+-    // because no later scenario in this file legitimately shows the
+-    // takeover, and only this test reads __takeoverSightings.
+-    await page.addInitScript(() => {
+-      const sightings: string[] = []
+-      ;(window as unknown as { __takeoverSightings: string[] }).__takeoverSightings = sightings
+-      setInterval(() => {
+-        if (document.querySelector(
+-          '[role="dialog"][aria-label="内测声明"], '
+-          + '[role="dialog"][aria-label="添加一个 API Key 开始使用"]',
+-        ) !== null) {
+-          sightings.push('chrome')
+-        }
+-        if (document.getElementById('root')?.inert === true) sightings.push('inert')
+-      }, 8)
+-    })
+-    // EVERY settings/describe issued before the release is held — not just
+-    // the first — so the pin cannot silently collapse back to loopback
+-    // timing if a second boot-time consumer of the join ever appears.
+-    let released = false
+-    const heldRoutes: Array<() => void> = []
+-    const releaseDescribe = (): void => {
+-      released = true
+-      for (const resolve of heldRoutes.splice(0)) resolve()
+-    }
+-    await page.route('**/api/settings/describe', async (route) => {
+-      if (!released) await new Promise<void>((resolve) => { heldRoutes.push(resolve) })
+-      await route.continue()
+-    })
+-    const warningsBefore = tripwire.warnings.length
+-    await page.reload({ waitUntil: 'commit' })
+-    await page.waitForSelector('[class*="frame"]', { timeout: 15_000 })
+-    // The app is painted and interactive while the steps are still deciding.
+-    await page.waitForTimeout(600)
+-    releaseDescribe()
+-    await page.waitForTimeout(400)
+-    await page.unroute('**/api/settings/describe')
+-    acknowledgeReloadConnectionLoss(tripwire, warningsBefore)
+-    expect(await page.evaluate(() =>
+-      (window as unknown as { __takeoverSightings: string[] }).__takeoverSightings)).toEqual([])
+-    expect(await page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.zh.title }).count()).toBe(0)
+-    expect(await page.getByRole('dialog', { name: '添加一个 API Key 开始使用' }).count()).toBe(0)
+-    expect(tripwire.pageErrors).toEqual([])
+-  }, 60_000)
+-
+-  it('configures arbitrary DeepSeek models and prompts after the selected model is removed', async () => {
+-    onTestFailed(() => saveFailureShot(page, 'web-e2e-onboarding-deepseek-models'))
+-    // Opened here rather than inherited: the credential test reloads the page
+-    // after configuring the key, so nothing carries an open dialog across.
+-    await page.getByRole('button', { name: '设置', exact: true }).click()
+-    const settings = page.getByRole('dialog', { name: '设置' })
+-    await settings.waitFor({ timeout: 10_000 })
+-    await settings.getByRole('button', { name: '模型' }).click()
+-    const deepSeek = settings.getByText('DeepSeek', { exact: true }).first()
+-    await deepSeek.waitFor({ timeout: 10_000 })
+-    await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+-    await settings.getByText('自定义设置').click()
+-    expect(await settings.getByLabel('模型 ID 1').inputValue()).toBe('deepseek-flash')
+-    expect(await settings.getByLabel('显示名称 1').inputValue()).toBe('DeepSeek-V41-Flash')
+-    expect(await settings.getByLabel('模型 ID 2').inputValue()).toBe('deepseek-v4-pro')
+-    expect(await settings.getByRole('button', { name: /删除模型/ }).count()).toBe(2)
+-    await settings.getByRole('button', { name: '模型选项 1' }).click()
+-    expect(await settings.getByRole('group', { name: '输入类型 1' }).getByRole('checkbox', { name: '图片' }).isChecked()).toBe(true)
+-    await assertModelInputLayout(page, settings)
+-    const defaultModels = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+-    await compareOrRefreshGolden(DEFAULT_MODELS_EXPECTED, defaultModels, MODE)
+-    await settings.getByLabel('显示名称 1').fill('Configured Flash')
+-    await settings.getByRole('group', { name: '输入类型 1' }).getByRole('checkbox', { name: '图片' }).uncheck()
+-    await settings.getByRole('button', { name: '保存', exact: true }).click()
+-    await settings.getByLabel('模型 ID 1').waitFor({ state: 'detached', timeout: 15_000 })
+-    const savedDefaults = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+-    expect(savedDefaults).toContain('id: deepseek-flash')
+-    expect(savedDefaults).toContain('inputModalities:')
+-    expect(savedDefaults).toContain('- text')
+-    expect(savedDefaults).toContain('systemPromptUpdate: in-history')
+-    await expect(scaffold.ctx.llm.resolveModelInfo('deepseek-official', 'deepseek-flash')).resolves.toMatchObject({
+-      name: 'Configured Flash', inputModalities: ['text'], systemPromptUpdate: 'in-history',
+-    })
+-    await expect(scaffold.ctx.llm.resolveModelInfo('deepseek-official', 'deepseek-v4-pro')).resolves.toMatchObject({
+-      name: 'DeepSeek-V4-Pro', inputModalities: ['text'],
+-    })
+-    await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+-    await settings.getByText('自定义设置').click()
+-    for (let index = 0; index < 2; index++) {
+-      await settings.getByRole('button', { name: /删除模型/ }).first().click()
+-    }
+-    await settings.getByRole('button', { name: '添加模型' }).click()
+-    const customModelId = settings.getByLabel('模型 ID 1')
+-    await customModelId.fill('private-preview')
+-    await settings.getByLabel('显示名称 1').fill('Private Preview')
+-    await settings.getByRole('button', { name: '模型选项 1' }).click()
+-    await settings.getByLabel('上下文窗口 1').fill('131072')
+-    await settings.getByLabel('最大输出 token 数 1').fill('64K')
+-    expect(await settings.getByRole('group', { name: '输入类型 1' }).getByRole('checkbox', { name: '图片' }).isChecked()).toBe(false)
+-    await settings.getByRole('group', { name: '输入类型 1' }).getByRole('checkbox', { name: '图片' }).check()
+-
+-    await expect.poll(
+-      () => settings.getByLabel('API 密钥', { exact: true }).getAttribute('placeholder'),
+-      { timeout: 10_000 },
+-    ).toBe('已配置——输入新值可替换')
+-    const modelEditor = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+-    await compareOrRefreshGolden(MODELS_EXPECTED, modelEditor, MODE)
+-    await settings.getByRole('button', { name: '保存', exact: true }).click()
+-    await customModelId.waitFor({ state: 'detached', timeout: 15_000 })
+-
+-    const document = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+-    expect(document).toContain('id: private-preview')
+-    expect(document).toContain('name: Private Preview')
+-    expect(document).toContain('contextWindow: 131072')
+-    expect(document).toContain('maxTokens: 64000')
+-    expect(document).not.toContain('id: deepseek-flash')
+-    await expect(scaffold.ctx.llm.resolveModelInfo('deepseek-official', 'private-preview')).resolves.toMatchObject({
+-      inputModalities: ['text', 'image'],
+-    })
+-    await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+-    await settings.getByText('自定义设置').click()
+-    await settings.getByRole('button', { name: '模型选项 1' }).click()
+-    expect(await settings.getByRole('group', { name: '输入类型 1' }).getByRole('checkbox', { name: '图片' }).isChecked()).toBe(true)
+-    await settings.getByRole('button', { name: '取消', exact: true }).click()
+-
+-    await page.keyboard.press('Escape')
+-    // A connected Workspace is what puts a live composer — and its model
+-    // trigger — on the page; the scaffold boots without one.
+-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'model-fallback-e2e')
+-
+-    const modelTrigger = page.getByRole('button', { name: /^选择模型/ })
+-    await modelTrigger.waitFor({ timeout: 10_000 })
+-    await modelTrigger.click()
+-    await page.getByRole('menuitem', { name: /模型/ }).click()
+-    expect(await page.getByText('Configured Flash', { exact: true }).count()).toBe(0)
+-    await page.getByRole('menuitemradio', { name: 'Private Preview' }).waitFor({ timeout: 10_000 })
+-    expect(tripwire.warnings).toEqual([])
+-    expect(tripwire.pageErrors).toEqual([])
+-  }, 60_000)
+-
+-  it('keeps the fixture inventory closed', async () => {
+-    await assertFixtureInventory(
+-      SNAPSHOT_DIR,
+-      ['welcome.expected.md', 'missing.expected.md', 'models.expected.md', 'default-models.expected.md'],
+-    )
+-  })
+-})
+diff --git a/packages/api/session-controller/src/agent.ts b/packages/api/session-controller/src/agent.ts
+index 8fd5255303..fcb7373199 100644
+--- a/packages/api/session-controller/src/agent.ts
++++ b/packages/api/session-controller/src/agent.ts
+@@ -66,7 +66,7 @@ export type ApiSessionAgentResult =
+   | { readonly error: ApiSessionAgentError }
+ 
+ type InstalledSelection = ModelSelectionRef & {
+-  current: AgentModelSelection
++  current: AgentModelSelection | undefined
+   consume(provider: string, model: string, reasoningEffort: string | undefined): boolean
+ }
+ 
+@@ -292,7 +292,7 @@ export class ApiSessionAgentController {
+       : agentModelSelection(projectionState.pending)
+     const defaultModel = this.ctx.agentDefaultModel
+     const selection: InstalledSelection = {
+-      get current(): AgentModelSelection {
++      get current(): AgentModelSelection | undefined {
+         if (picked !== undefined) return picked
+         const loggedHeader = agent.session.requestHeader()
+         if (loggedHeader === undefined) return defaultModel.currentSelection()
+@@ -495,8 +495,8 @@ export class ApiSessionAgentController {
+   }
+ 
+   private agentOptions(): AgentOptions {
+-    const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
+-    return { provider, model }
++    const selection = this.ctx.agentDefaultModel.currentSelection()
++    return selection === undefined ? {} : { provider: selection.provider, model: selection.model }
+   }
+ 
+   private installSelection(agent: Agent): void {
+diff --git a/packages/api/session-controller/src/catalog.ts b/packages/api/session-controller/src/catalog.ts
+index 0c97107f03..ae8904d440 100644
+--- a/packages/api/session-controller/src/catalog.ts
++++ b/packages/api/session-controller/src/catalog.ts
+@@ -15,7 +15,7 @@ import type {
+  */
+ export async function buildModelCatalog(
+   ctx: Context,
+-  defaultSelection: ModelSelection = ctx.agentDefaultModel.currentSelection(),
++  defaultSelection: ModelSelection | undefined = ctx.agentDefaultModel.currentSelection(),
+ ): Promise<ModelCatalog> {
+   const providers = ctx.llm.listProviders()
+   const catalog = await Promise.all(providers.map(async (provider) => {
+@@ -58,7 +58,7 @@ export async function buildModelCatalog(
+     }
+   }))
+   return {
+-    default: { ...defaultSelection },
++    default: defaultSelection === undefined ? null : { ...defaultSelection },
+     routableProviders: providers.map(provider => provider.id),
+     groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : [])
+       .filter(group => group.models.length > 0),
+diff --git a/packages/api/session-controller/src/commands.ts b/packages/api/session-controller/src/commands.ts
+index 80008319fe..376d4bd4da 100644
+--- a/packages/api/session-controller/src/commands.ts
++++ b/packages/api/session-controller/src/commands.ts
+@@ -254,7 +254,7 @@ export class SessionCommandController {
+     const childId = brandString<SessionId>(`session-${randomUUID()}`)
+     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
+     try {
+-      const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
++      const defaultSelection = this.ctx.agentDefaultModel.currentSelection()
+       await this.ctx.agents.create({
+         sessionId: childId,
+         seed: source.events.slice(0, cut),
+@@ -267,7 +267,9 @@ export class SessionCommandController {
+             ? {}
+             : { agentPreset: composition.agentPreset }),
+         },
+-        agentOptions: { provider, model },
++        agentOptions: defaultSelection === undefined
++          ? {}
++          : { provider: defaultSelection.provider, model: defaultSelection.model },
+         setup: composition.setup,
+       })
+     } catch (error) {
+@@ -317,11 +319,13 @@ export class SessionCommandController {
+     const agent = await this.resolveAgent(request.sessionId)
+     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+     const selection = this.agents.selectionFor(agent).current
+-    if (!routeServed(this.ctx, selection.provider)) {
++    if (selection === undefined || !routeServed(this.ctx, selection.provider)) {
+       throw new RemoteError(
+         'session/model-unavailable',
+-        `no adapter serves provider "${selection.provider}"; select a model for this session`,
+-        { provider: selection.provider, model: selection.model },
++        selection === undefined
++          ? 'no model is selected for this session; select a model before sending'
++          : `no adapter serves provider "${selection.provider}"; select a model for this session`,
++        { provider: selection?.provider ?? '', model: selection?.model ?? '' },
+       )
+     }
+     const source: MessageSource = {
+@@ -334,6 +338,13 @@ export class SessionCommandController {
+       try {
+         if (hasImage) {
+           const current = this.agents.selectionFor(agent).current
++          if (current === undefined) {
++            throw new RemoteError(
++              'session/model-unavailable',
++              'no model is selected for this session; select a model before sending',
++              { provider: '', model: '' },
++            )
++          }
+           const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
+           if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+             throw new RemoteError(
+diff --git a/packages/api/session-controller/src/types.ts b/packages/api/session-controller/src/types.ts
+index f03d8d1b65..47ca94a465 100644
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -142,7 +142,7 @@ export interface ModelCatalogFailure {
+ 
+ /** Host-generation model catalog and the default used by unconfigured Sessions. */
+ export interface ModelCatalog {
+-  readonly default: ModelSelection
++  readonly default: ModelSelection | null
+   /** Provider routes currently able to serve a request, including empty catalogs. */
+   readonly routableProviders: readonly string[]
+   readonly groups: readonly ModelProviderGroup[]
+diff --git a/packages/api/session-controller/tests/session-models.host.spec.ts b/packages/api/session-controller/tests/session-models.host.spec.ts
+index bb9e77b4e2..2d410cfb7f 100644
+--- a/packages/api/session-controller/tests/session-models.host.spec.ts
++++ b/packages/api/session-controller/tests/session-models.host.spec.ts
+@@ -612,7 +612,7 @@ describe('Web session model selection', () => {
+       error: { code: 'session/model-unavailable', details: { provider: 'deleted-gateway', model: 'deleted-model' } },
+     })
+     const unavailableCatalog = await buildModelCatalog(ctx)
+-    expect(unavailableCatalog.routableProviders.includes(currentSelection(ctx, sessionId).provider)).toBe(false)
++    expect(unavailableCatalog.routableProviders.includes(currentSelection(ctx, sessionId)!.provider)).toBe(false)
+ 
+     // An advisory-unlisted model on a live route is NOT this: the route
+     // serves it, so the prompt goes through and nothing blocks.
+@@ -620,7 +620,7 @@ describe('Web session model selection', () => {
+       sessionId, provider: 'deepseek-official', model: 'unlisted-but-served',
+     })))
+     const catalog = await buildModelCatalog(ctx)
+-    expect(catalog.routableProviders.includes(currentSelection(ctx, sessionId).provider)).toBe(true)
++    expect(catalog.routableProviders.includes(currentSelection(ctx, sessionId)!.provider)).toBe(true)
+     expect(catalog.groups.flatMap(group => group.models.map(model => model.id)))
+       .not.toContain('unlisted-but-served')
+     await ctx.fiber.dispose()
+diff --git a/packages/bundle/acp-app/README.md b/packages/bundle/acp-app/README.md
+index c770e25bbc..b9481afe7a 100644
+--- a/packages/bundle/acp-app/README.md
++++ b/packages/bundle/acp-app/README.md
+@@ -26,7 +26,7 @@ The automation-only ACP stdio application as a `dsh` profile bundle over [`dsh-b
+ 
+ The startup provider binds stdin EOF to the launcher's bounded successful shutdown. ACP connection close, SIGINT, and SIGTERM drain the bridge-owned agents and the root profile tree before exit. Stdout is reserved for newline-delimited ACP JSON-RPC frames. The bundle disables model-generated session titles because ACP exposes no title surface; deterministic fallback titles remain durable without an auxiliary model request. The inherited projection cache checkpoints ACP-created sessions for later consumers; its durability barrier flushes each covered log prefix before publishing the cache row and may split otherwise coalesced JSONL runs. A deployment selects a different complete composition through profile bundles and patch files, not another app bin.
+ 
+-The shipped row creates sessions with `deepseek-official` and `deepseek-v4-flash`; a later patch can replace that row's complete config. The base profile owns adapters, tools, persistence, policy, settings, credentials, and the per-session workspace supplied by the ACP client.
++The shipped row pins no default model; a later patch (or the deployment's settings) supplies the provider and model each ACP-created session should use. The base profile owns adapters, tools, persistence, policy, settings, credentials, and the per-session workspace supplied by the ACP client.
+ 
+ -----
+ 
+diff --git a/packages/bundle/acp-app/cordis.patch.yml b/packages/bundle/acp-app/cordis.patch.yml
+index 313dab80ae..c75f4d2a7b 100644
+--- a/packages/bundle/acp-app/cordis.patch.yml
++++ b/packages/bundle/acp-app/cordis.patch.yml
+@@ -16,9 +16,6 @@
+     - id: acp
+       name: '@deepseek-ai/dsh-acp'
+       inject: [acpAppStartup]
+-      config:
+-        provider: deepseek-official
+-        model: deepseek-v4-flash
+ 
+ - id: hmr
+   disabled: true
+diff --git a/packages/bundle/acp-app/tests/acp-app.spec.ts b/packages/bundle/acp-app/tests/acp-app.spec.ts
+index 925c4e8044..75250902a5 100644
+--- a/packages/bundle/acp-app/tests/acp-app.spec.ts
++++ b/packages/bundle/acp-app/tests/acp-app.spec.ts
+@@ -30,7 +30,6 @@ describe('dsh-acp-app bundle', () => {
+     expect(rows.find(row => row.id === 'acp-app-startup')?.name).toBe('@deepseek-ai/dsh-acp-app')
+     expect(rows.find(row => row.id === 'acp')).toMatchObject({
+       inject: ['acpAppStartup'],
+-      config: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+     })
+   })
+ })
+diff --git a/packages/bundle/base/README.md b/packages/bundle/base/README.md
+index f9cc3e4d03..f18d9828e0 100644
+--- a/packages/bundle/base/README.md
++++ b/packages/bundle/base/README.md
+@@ -47,7 +47,7 @@ Run `dsh --profile my-profile "your task"` and you get a working agent with mode
+ 
+ ### What you get
+ 
+-Out of the box, every profile built on this core provides: a DeepSeek model connection (the provider and model are configurable, and you can enable extra providers from your settings), the full tool set — file editing, shell commands, web search, public HTTP(S) fetch, subagents, task and goal tracking — durable sessions that survive restarts, and the default permission policy that confines file writes to your workspace and asks before risky actions. Web fetch runs without per-call approval; its provider rejects non-public destinations. Feedback stays in the Session log. [OTel session upload](../../session/session-telemetry-otel/README.md) defaults to `FEEDBACK_ONLY` for all users, including `deepseek-official`: new text feedback, message ratings, edits, and withdrawals release the complete canonical prefix through that event, including context. Later records wait for the next explicit feedback; sending an authorized batch needs no further interaction or model call. `DISABLED` prevents OTel capture. The default-on [DeepSeek session-log contributor](../../session/session-log-deepseek/README.md) remains a separate request path.
++Out of the box, every profile built on this core provides: a provider-agnostic model layer (no default provider or model is pinned — you add your own provider from settings, for example through the [pi-ai adapter](../../llm/llm-pi-ai/README.md)), the full tool set — file editing, shell commands, web search, public HTTP(S) fetch, subagents, task and goal tracking — durable sessions that survive restarts, and the default permission policy that confines file writes to your workspace and asks before risky actions. Web fetch runs without per-call approval; its provider rejects non-public destinations. Feedback stays in the Session log. [OTel session upload](../../session/session-telemetry-otel/README.md) is `DISABLED` by default: nothing is exported unless a deployment opts in with `FEEDBACK_ONLY`, which releases the canonical prefix only after new explicit feedback.
+ 
+ Default file editing uses `read`, `write`, and `edit`. The `str_replace_editor` tool remains available as an explicit opt-in. To add it to a base-backed profile, put this entry in the profile, home, or invocation patch:
+ 
+diff --git a/packages/bundle/base/cordis.patch.yml b/packages/bundle/base/cordis.patch.yml
+index 1aaf9da6b4..acbf4edb60 100644
+--- a/packages/bundle/base/cordis.patch.yml
++++ b/packages/bundle/base/cordis.patch.yml
+@@ -34,15 +34,9 @@
+     - id: llm
+       name: '@deepseek-ai/dsh-llm'
+ 
+-    - id: deepseek-llm-api-extensions
+-      name: '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+-
+     - id: session
+       name: '@deepseek-ai/dsh-session'
+ 
+-    - id: session-log-deepseek
+-      name: '@deepseek-ai/dsh-session-log-deepseek'
+-
+     - id: typert
+       name: '@deepseek-ai/dsh-typert-registry'
+ 
+@@ -74,16 +68,12 @@
+     - id: agent
+       name: '@deepseek-ai/dsh-agent'
+ 
+-    - id: plugin-package-inventory-deepseek
+-      name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+-
+     # The transport-independent default for Agents created by entry points.
+-    # Settings may supply a saved selection; consumers read it at creation time.
++    # Provider-agnostic: no default is pinned here, so a fresh session has no
++    # model until the user selects one (saved to the `agent-default-model`
++    # settings section) or a deployment overlay sets a provider/model.
+     - id: agent-default-model
+       name: '@deepseek-ai/dsh-agent-default-model'
+-      config:
+-        provider: deepseek-official
+-        model: deepseek-flash
+ 
+     - id: jobs
+       name: '@deepseek-ai/dsh-jobs-local'
+@@ -92,8 +82,8 @@
+       name: '@deepseek-ai/dsh-llm-retry'
+ 
+     # User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
+-    # `llm-deepseek:` or `llm-pi-ai:` section there overrides the adapter entries
+-    # below without a restart, and is what the web Models page writes.
++    # `llm-pi-ai:` section there supplies provider profiles without a restart,
++    # and is what the web Models page writes.
+     - id: settings
+       name: '@deepseek-ai/dsh-settings-file'
+ 
+@@ -172,26 +162,29 @@
+         writeEveryEvents: 200
+         writeIntervalMs: 5000
+ 
+-    # OTel releases a Session-log prefix only after explicit user feedback,
+-    # regardless of model provider. Ordinary activity never triggers capture.
+-    # DSH_TELEMETRY_OTLP_URL overrides the production endpoint. A non-empty
+-    # DSH_TELEMETRY_DISABLED — any value, including '0'/'false' — opts the
+-    # process out (the launchers patch the row disabled; config cannot disable
+-    # a row). Exports carry the harness home's anonymous user id ($DSH_HOME/.anonymous-user-id,
+-    # random UUID; delete the file to reset the identity) as the Resource's
+-    # user.id. The exporter/processor values normally bound the shutdown drain
+-    # to ~1s against an unreachable collector: exporter.timeoutMillis is both
+-    # the per-attempt socket timeout and the retry deadline (1s effectively
+-    # disables the SDK's 5-try backoff), while maxExportBatchSize == maxQueueSize
+-    # (both explicit) makes the drain a single batch. The SDK awaits
+-    # exporter.forceFlush() outside exportTimeoutMillis, so the backend's 3s
+-    # shutdownTimeoutMillis is the load-bearing outer bound when a transport
+-    # promise never settles. Every CLI exit path drains it by disposing the root
+-    # on SIGINT/SIGTERM.
++    # OTel upload is DISABLED by default: ordinary activity never triggers
++    # capture and nothing leaves the machine unless a deployment opts in by
++    # setting DSH_TELEMETRY_MODE=FEEDBACK_ONLY (or a later patch restates
++    # `mode`), which releases a Session-log prefix only after explicit user
++    # feedback, regardless of model provider. DSH_TELEMETRY_OTLP_URL overrides
++    # the production endpoint. A non-empty DSH_TELEMETRY_DISABLED — any value,
++    # including '0'/'false' — also opts the process out (the launchers patch
++    # the row disabled; config cannot disable a row). Exports carry the harness
++    # home's anonymous user id ($DSH_HOME/.anonymous-user-id, random UUID;
++    # delete the file to reset the identity) as the Resource's user.id. The
++    # exporter/processor values normally bound the shutdown drain to ~1s
++    # against an unreachable collector: exporter.timeoutMillis is both the
++    # per-attempt socket timeout and the retry deadline (1s effectively
++    # disables the SDK's 5-try backoff), while maxExportBatchSize ==
++    # maxQueueSize (both explicit) makes the drain a single batch. The SDK
++    # awaits exporter.forceFlush() outside exportTimeoutMillis, so the
++    # backend's 3s shutdownTimeoutMillis is the load-bearing outer bound when a
++    # transport promise never settles. Every CLI exit path drains it by
++    # disposing the root on SIGINT/SIGTERM.
+     - id: session-telemetry-otel
+       name: '@deepseek-ai/dsh-session-telemetry-otel'
+       config:
+-        mode: !!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'
++        mode: !!js process.env.DSH_TELEMETRY_MODE || 'DISABLED'
+         shutdownTimeoutMillis: 3000
+         exporter:
+           url: !!js process.env.DSH_TELEMETRY_OTLP_URL ?? 'https://harness-telemetry.deepseeksvc.com/v1/logs'
+@@ -446,26 +439,16 @@
+ 
+     # The shared base enables the stable model-facing web_search and web_fetch
+     # tools. The Web app disables this host row and composes both tools per agent
+-    # preset; products with a stricter network policy override tool-web. DeepSeek
+-    # search resolves the same DEEPSEEK_API_KEY
+-    # credential the Models page manages for chat, at each search; its Messages
+-    # endpoint is separate from the chat-completions endpoint, so it takes its own
+-    # base-URL override. Anonymous fetch accepts only public HTTP(S) destinations,
+-    # resolves and validates every destination, and pins every actual connection.
+-    # Search is a full auxiliary model request with server-side retrieval, so this
+-    # shipped DeepSeek route gets 60s while the provider-neutral tool default
+-    # remains 30s.
++    # preset; products with a stricter network policy override tool-web. No
++    # search provider is pinned here: a deployment adds its own provider and
++    # sets searchProvider. Anonymous fetch accepts only public HTTP(S)
++    # destinations, resolves and validates every destination, and pins every
++    # actual connection.
+     - id: web
+       name: '@deepseek-ai/dsh-web'
+       config:
+-        searchProvider: deepseek-official
+         fetchProvider: http
+ 
+-    - id: web-search-deepseek
+-      name: '@deepseek-ai/dsh-web-search-deepseek'
+-      config:
+-        apiKeyEnv: DEEPSEEK_API_KEY
+-
+     - id: web-fetch-http
+       name: '@deepseek-ai/dsh-web-fetch-http'
+ 
+@@ -503,10 +486,3 @@
+     # overlay can pin another workspace.
+     - id: fs-sandbox
+       name: '@deepseek-ai/dsh-fs-sandbox'
+-
+-    # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
+-    # request from the `llm-deepseek:` settings section over this entry, with the
+-    # key coming from the credential store below. Thinking defaults are a deployment
+-    # choice.
+-    - id: llm-deepseek
+-      name: '@deepseek-ai/dsh-llm-deepseek'
+diff --git a/packages/bundle/base/package.json b/packages/bundle/base/package.json
+index 8ef9704211..6e77159b66 100644
+--- a/packages/bundle/base/package.json
++++ b/packages/bundle/base/package.json
+@@ -50,8 +50,6 @@
+     "@deepseek-ai/dsh-compaction-image-offload": "workspace:^",
+     "@deepseek-ai/dsh-compaction-tool-result-pruner": "workspace:^",
+     "@deepseek-ai/dsh-credentials-local": "workspace:^",
+-    "@deepseek-ai/dsh-deepseek-llm-api-extensions": "workspace:^",
+-    "@deepseek-ai/dsh-plugin-package-inventory-deepseek": "workspace:^",
+     "@deepseek-ai/dsh-fs-local": "workspace:^",
+     "@deepseek-ai/dsh-fs-observation-policy": "workspace:^",
+     "@deepseek-ai/dsh-fs-sandbox": "workspace:^",
+@@ -59,7 +57,6 @@
+     "@deepseek-ai/dsh-goal-round-driver": "workspace:^",
+     "@deepseek-ai/dsh-api-gateway": "workspace:^",
+     "@deepseek-ai/dsh-llm": "workspace:^",
+-    "@deepseek-ai/dsh-llm-deepseek": "workspace:^",
+     "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
+     "@deepseek-ai/dsh-llm-retry": "workspace:^",
+     "@deepseek-ai/dsh-mcp-resources": "workspace:^",
+@@ -71,7 +68,6 @@
+     "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+     "@deepseek-ai/dsh-session": "workspace:^",
+     "@deepseek-ai/dsh-session-checkpoint-policy": "workspace:^",
+-    "@deepseek-ai/dsh-session-log-deepseek": "workspace:^",
+     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
+     "@deepseek-ai/dsh-session-projection": "workspace:^",
+     "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+@@ -117,7 +113,6 @@
+     "@deepseek-ai/dsh-user-questions": "workspace:^",
+     "@deepseek-ai/dsh-web": "workspace:^",
+     "@deepseek-ai/dsh-web-fetch-http": "workspace:^",
+-    "@deepseek-ai/dsh-web-search-deepseek": "workspace:^",
+     "@deepseek-ai/dsh-workflow-ptc": "workspace:^",
+     "@deepseek-ai/dsh-agent-instructions": "workspace:^",
+     "@deepseek-ai/dsh-ptc-runtime-node": "workspace:^",
+diff --git a/packages/bundle/base/tests/base.spec.ts b/packages/bundle/base/tests/base.spec.ts
+index 0976268a07..2749c6df35 100644
+--- a/packages/bundle/base/tests/base.spec.ts
++++ b/packages/bundle/base/tests/base.spec.ts
+@@ -34,7 +34,7 @@ describe('dsh-base bundle', () => {
+     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
+     expect(rows.find(row => row.id === 'session-telemetry-otel')?.disabled).toBeUndefined()
+     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
+-      __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'",
++      __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",
+     })
+     expect(rows.find(row => row.id === 'hmr')).toMatchObject({
+       config: { root: [] },
+diff --git a/packages/bundle/headless/src/index.ts b/packages/bundle/headless/src/index.ts
+index aecccea08b..3d7fd707ac 100644
+--- a/packages/bundle/headless/src/index.ts
++++ b/packages/bundle/headless/src/index.ts
+@@ -330,6 +330,9 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void>
+   }
+ 
+   const selection = defaultModel.currentSelection()
++  if (selection === undefined) {
++    throw new Error('headless-runner: no default model is configured; set the agent-default-model provider/model or select a model')
++  }
+   const agentOptions = { provider: selection.provider, model: selection.model }
+   // This bundle composes no preset roster, so the model-facing rows sit in the
+   // host plane and the agent reads them from the global layer. A deployment
+diff --git a/packages/bundle/web-app/README.md b/packages/bundle/web-app/README.md
+index d74489dd29..c66fc2c9c7 100644
+--- a/packages/bundle/web-app/README.md
++++ b/packages/bundle/web-app/README.md
+@@ -36,9 +36,9 @@ dsh --profile web --no-open --port 8080
+ 
+ After startup you see a `dsh web:` line whose root URL carries a fresh process token. Unless `--no-open` or an SSH session suppresses it, the default browser opens that URL, receives a signed cookie, and redirects to the clean root page. You know it worked when the page loads and you can chat with the agent. Two failures to expect: if the frontend is not built, startup stops with a build hint (`pnpm run build` in a checkout); if the browser cannot be opened, a credential-free diagnostic prints to stderr while the server keeps running — open the printed startup URL yourself.
+ 
+-**Settings → Models** displays **DeepSeek**, using `DEEPSEEK_API_KEY`. The default is `deepseek-official` / `deepseek-flash` (DeepSeek-V41-Flash). The [DeepSeek plugin](../../llm/llm-deepseek/README.md#choose-a-protocol) defaults to Messages; set `protocol: chat-completions` in Cordis YAML to select Chat Completions. Web has no protocol selector.
++**Settings → Models** has no pre-selected provider: the base profile is provider-agnostic, so add your own provider (for example through the [pi-ai adapter](../../llm/llm-pi-ai/README.md)) and choose a model there. Web has no protocol selector.
+ 
+-Saved model selections override the composition default. Both protocols share `deepseek-official` and `llm-deepseek` settings, so switching preserves model selections and credential references. Endpoint overrides retain their values; the settings card lets users supply a compatible API address.
++Saved model selections override the composition default. A later patch can pin a deployment-wide default provider and model.
+ 
+ ### Configuration
+ 
+diff --git a/packages/client/ui-model-selection/src/client/directory.ts b/packages/client/ui-model-selection/src/client/directory.ts
+index b27811f501..836217ad37 100644
+--- a/packages/client/ui-model-selection/src/client/directory.ts
++++ b/packages/client/ui-model-selection/src/client/directory.ts
+@@ -167,7 +167,7 @@ export class ModelDirectory {
+     this.resolved = true
+     this.store.set({
+       current,
+-      routable: catalog.value.routableProviders.includes(current.provider),
++      routable: current !== null && catalog.value.routableProviders.includes(current.provider),
+       groups: catalog.value.groups,
+       failures: catalog.value.failures,
+       status: this.store.getSnapshot().status === 'selecting'
+diff --git a/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.module.css b/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.module.css
+deleted file mode 100644
+index 9f7ecbc611..0000000000
+--- a/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.module.css
++++ /dev/null
+@@ -1,16 +0,0 @@
+-.description {
+-  margin: 0;
+-  font-size: 14px;
+-  line-height: 24px;
+-  color: var(--dsw-alias-label-secondary);
+-}
+-
+-.editor {
+-  margin-top: 24px;
+-}
+-
+-@media (max-width: 560px) {
+-  .editor {
+-    margin-top: 20px;
+-  }
+-}
+diff --git a/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.tsx b/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.tsx
+deleted file mode 100644
+index 3d764a1ed6..0000000000
+--- a/packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.tsx
++++ /dev/null
+@@ -1,124 +0,0 @@
+-/**
+- * Official-DeepSeek first-run step. Readiness comes from the same
+- * provider/settings/credential join as the Models page: any provider the user
+- * can already talk to ends the step, and only a user with none is offered the
+- * official DeepSeek route. The step reuses that page's credential editor in
+- * the onboarding plugin's shared modal, so the key is entered once.
+- */
+-
+-import { useEffect } from 'react'
+-import type { ReactNode } from 'react'
+-import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+-import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+-import type { ModelsSettingsState, ModelsSettingsStore } from './store.ts'
+-import { onboardingReadiness } from './store.ts'
+-import type { ModelsOperations } from './operations.ts'
+-import type { SettingsSchemaOperations } from './schema-operations.ts'
+-import { ProviderEditor } from './ProviderEditor.tsx'
+-import type { en } from './locales.ts'
+-import { OnboardingModal } from './OnboardingModal.tsx'
+-import styles from './DeepSeekOnboardingDialog.module.css'
+-
+-/** Registration-side dependencies of {@link DeepSeekOnboardingDialog}. */
+-export interface DeepSeekOnboardingInjected {
+-  hooks: {
+-    /** Shared Models-page join state, bound by the slot renderer. */
+-    models: SnapshotStore<ModelsSettingsState>
+-  }
+-  /** Shared Models-page join controller. */
+-  controller: ModelsSettingsStore
+-  /** The Host operations the reused Models credential editor writes through. */
+-  operations: ModelsOperations
+-  /** Settings schema and immutable path callbacks. */
+-  schema: SettingsSchemaOperations
+-  /** Feature copy. */
+-  t: (key: keyof typeof en) => string
+-}
+-
+-/** Slot owner props plus the feature's injected dependencies. */
+-export type DeepSeekOnboardingDialogProps =
+-  PropsRuntime<'settings.onboarding'> & InjectFace<DeepSeekOnboardingInjected>
+-
+-/* v8 ignore next 3 -- closed-union defaults only defend future source widening */
+-function assertNever(_value: never): never {
+-  throw new Error('unexpected DeepSeek onboarding state')
+-}
+-
+-/**
+- * Prompt a first-run user for the official DeepSeek credential while no
+- * provider can serve requests and that credential is writable.
+- * @param props - settings-shell owner state and Models feature dependencies.
+- * @returns the onboarding modal or null when onboarding needs no intervention.
+- */
+-export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): ReactNode {
+-  const { complete, controller, useModels, operations, schema, t } = props
+-  const state = useModels(snapshot => snapshot)
+-  const readiness = onboardingReadiness(state)
+-
+-  useEffect(() => {
+-    if (state.status === 'idle') void controller.load()
+-  }, [controller, state.status])
+-
+-  useEffect(() => {
+-    if (
+-      readiness.kind === 'adapter-absent'
+-      || readiness.kind === 'provider-ready'
+-      || readiness.kind === 'unavailable'
+-    ) complete()
+-  }, [complete, readiness.kind])
+-
+-  switch (readiness.kind) {
+-    case 'loading':
+-    case 'adapter-absent':
+-    case 'provider-ready':
+-    case 'unavailable':
+-      return null
+-    case 'credential-missing':
+-      break
+-    /* v8 ignore next -- every current readiness variant is handled above */
+-    default:
+-      return assertNever(readiness)
+-  }
+-
+-  const row = state.rows.find(candidate =>
+-    candidate.entry.provider === 'deepseek-official'
+-    && candidate.entry.settingsNs === 'llm-deepseek'
+-    && candidate.entry.settingsPath.length === 0)
+-  const namespace = state.namespaces.get('llm-deepseek')
+-  /* v8 ignore next 2 -- credential-missing is derived only from this exact joined row. */
+-  if (row === undefined || namespace === undefined) return null
+-
+-  const finishCredential = (changed: boolean): void => {
+-    if (!changed) {
+-      complete()
+-      return
+-    }
+-    void controller.load()
+-  }
+-
+-  return (
+-    <OnboardingModal title={t('onboardingTitle')}>
+-      <p className={styles.description}>{t('onboardingDescription')}</p>
+-      <div className={styles.editor}>
+-        <ProviderEditor
+-          provider={row.entry.provider}
+-          displayName={row.entry.displayName}
+-          namespace={namespace}
+-          schema={schema}
+-          settingsPath={row.entry.settingsPath}
+-          operations={operations}
+-          t={t}
+-          readOnly={false}
+-          hideTitle
+-          credentialOnly
+-          credentialRequired
+-          autoFocusCredential
+-          cancelLabelKey="onboardingLater"
+-          submitLabelKey="onboardingSave"
+-          submitBusyLabelKey="onboardingSaving"
+-          onClose={finishCredential}
+-        />
+-      </div>
+-    </OnboardingModal>
+-  )
+-}
+diff --git a/packages/client/ui-settings-models/src/client/index.ts b/packages/client/ui-settings-models/src/client/index.ts
+index 721f807092..d1a3f2817f 100644
+--- a/packages/client/ui-settings-models/src/client/index.ts
++++ b/packages/client/ui-settings-models/src/client/index.ts
+@@ -17,8 +17,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+ import type {} from '@deepseek-ai/dsh-api-remotes/client'
+ import { ModelsSection } from './ModelsSection.tsx'
+ import type { ModelsSectionInjected } from './ModelsSection.tsx'
+-import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
+-import type { DeepSeekOnboardingInjected } from './DeepSeekOnboardingDialog.tsx'
+ import { WelcomeNotice } from './WelcomeNotice.tsx'
+ import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
+ import { decodeWelcomeSection, WelcomeNoticeStore } from './welcome-store.ts'
+@@ -90,13 +88,6 @@ export function apply(ctx: ClientContext): void {
+     schema,
+     t,
+   })
+-  const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
+-    controller,
+-    hooks: { models: controller.store },
+-    operations,
+-    schema,
+-    t,
+-  })
+   // The scope's own memory mode is what keeps a remote browser process-local,
+   // so the store needs no isLoopback branch of its own.
+   const welcomeController = new WelcomeNoticeStore(ctx.settingsScope.bind({
+@@ -145,10 +136,4 @@ export function apply(ctx: ClientContext): void {
+     order: -100,
+     inject: welcomeInjected,
+   }, WelcomeNotice))
+-  ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+-    name: 'settings.onboarding',
+-    id: 'deepseek-official',
+-    order: 0,
+-    inject: deepSeekOnboardingInjected,
+-  }, DeepSeekOnboardingDialog))
+ }
+diff --git a/packages/client/ui-settings-models/src/client/store.ts b/packages/client/ui-settings-models/src/client/store.ts
+index 2af1d54d5c..8008cb0d06 100644
+--- a/packages/client/ui-settings-models/src/client/store.ts
++++ b/packages/client/ui-settings-models/src/client/store.ts
+@@ -267,74 +267,3 @@ export function providerUsable(row: ProviderRow): boolean {
+   if (row.apiKeyEnv === undefined) return true
+   return row.credential?.configured === true
+ }
+-
+-/** First-run onboarding readiness derived only from the shared Models join. */
+-export type OnboardingReadiness =
+-  | { kind: 'loading' }
+-  | { kind: 'adapter-absent' }
+-  | { kind: 'provider-ready' }
+-  | { kind: 'credential-missing' }
+-  | {
+-    kind: 'unavailable'
+-    reason:
+-      | 'load-failed'
+-      | 'provider-inactive'
+-      | 'credentials-unavailable'
+-      | 'settings-read-only'
+-      | 'credential-read-only'
+-  }
+-
+-/**
+- * Project first-run readiness from the provider/settings/credential join used
+- * by the Models page. The step exists to leave the user with a model to talk
+- * to, so ANY usable provider ends it; only when none exists does the official
+- * DeepSeek route — the one route the prompt can offer a key field for — decide
+- * whether prompting can help. A missing official configurable-provider
+- * declaration means the adapter is not repairable by navigating to Models.
+- * @param state - current shared Models join snapshot.
+- * @returns the onboarding state without reading a parallel fact source.
+- */
+-export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadiness {
+-  if ((state.status === 'idle' || state.status === 'loading') && state.rows.length === 0) {
+-    return { kind: 'loading' }
+-  }
+-  if (state.status === 'error') {
+-    return {
+-      kind: 'unavailable',
+-      reason: 'load-failed',
+-    }
+-  }
+-  if (state.rows.some(providerUsable)) return { kind: 'provider-ready' }
+-  const row = state.rows.find(candidate =>
+-    candidate.entry.provider === 'deepseek-official'
+-    && candidate.entry.settingsNs === 'llm-deepseek'
+-    && candidate.entry.settingsPath.length === 0)
+-  if (row === undefined) return { kind: 'adapter-absent' }
+-  if (!row.entry.active) {
+-    return {
+-      kind: 'unavailable',
+-      reason: 'provider-inactive',
+-    }
+-  }
+-  // Past the usable gate an active route names a reference it has no stored
+-  // credential for, so the remaining questions are all about that credential.
+-  if (state.credentialError !== null || row.credential === undefined) {
+-    return {
+-      kind: 'unavailable',
+-      reason: 'credentials-unavailable',
+-    }
+-  }
+-  if (!state.writable) {
+-    return {
+-      kind: 'unavailable',
+-      reason: 'settings-read-only',
+-    }
+-  }
+-  if (!row.credential.writable) {
+-    return {
+-      kind: 'unavailable',
+-      reason: 'credential-read-only',
+-    }
+-  }
+-  return { kind: 'credential-missing' }
+-}
+diff --git a/packages/client/ui-settings-models/tests/apply.client.spec.ts b/packages/client/ui-settings-models/tests/apply.client.spec.ts
+index da1dd00f50..1dd6032acb 100644
+--- a/packages/client/ui-settings-models/tests/apply.client.spec.ts
++++ b/packages/client/ui-settings-models/tests/apply.client.spec.ts
+@@ -13,7 +13,6 @@ import {
+   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_SETTINGS_NAMESPACE, WELCOME_NOTICE_VERSION,
+ } from '../src/onboarding-copy.ts'
+ import { ModelsSection } from '../src/client/ModelsSection.tsx'
+-import { DeepSeekOnboardingDialog } from '../src/client/DeepSeekOnboardingDialog.tsx'
+ import { WelcomeNotice } from '../src/client/WelcomeNotice.tsx'
+ import { apply as hostApply } from '../src/index.ts'
+ 
+@@ -92,19 +91,11 @@ describe('ui-settings-models apply', () => {
+     expect(injected.hooks.snapshot).toBe(injected.controller.store)
+     expect(typeof injected.operations.writeSettings).toBe('function')
+     const onboarding = before.slots.entries('settings.onboarding')
+-    expect(onboarding).toHaveLength(2)
++    expect(onboarding).toHaveLength(1)
+     expect(onboarding.find(entry => entry.options.id === 'welcome-notice')).toMatchObject({
+       component: WelcomeNotice,
+       options: { id: 'welcome-notice', order: -100 },
+     })
+-    const deepSeek = onboarding.find(entry => entry.options.id === 'deepseek-official')!
+-    expect(deepSeek.component).toBe(DeepSeekOnboardingDialog)
+-    expect(deepSeek.options).toMatchObject({ id: 'deepseek-official', order: 0 })
+-    const deepSeekInjected = (
+-      deepSeek.inject as unknown as () => import('../src/client/DeepSeekOnboardingDialog.tsx').DeepSeekOnboardingInjected
+-    )()
+-    expect(deepSeekInjected.hooks.models).toBe(injected.controller.store)
+-    expect(typeof deepSeekInjected.operations.storeCredential).toBe('function')
+ 
+     const after = await bench()
+     await after.ctx.plugin({ inject: [...inject], apply }).await()
+@@ -113,7 +104,7 @@ describe('ui-settings-models apply', () => {
+     declare(after.slots)
+     await Promise.resolve()
+     expect(after.slots.entries('settings.section')[0]!.component).toBe(ModelsSection)
+-    expect(after.slots.entries('settings.onboarding')).toHaveLength(2)
++    expect(after.slots.entries('settings.onboarding')).toHaveLength(1)
+     // The self-inflicted ledger notifications hit the duplicate guard.
+     expect(after.slots.entries('settings.section')).toHaveLength(1)
+   })
+@@ -152,7 +143,7 @@ describe('ui-settings-models apply', () => {
+     declare(b.slots)
+     await Promise.resolve()
+     expect(b.slots.entries('settings.section')[0]!.component).toBe(ModelsSection)
+-    expect(b.slots.entries('settings.onboarding')).toHaveLength(2)
++    expect(b.slots.entries('settings.onboarding')).toHaveLength(1)
+     // The locale path also recovers through the same ledger re-check.
+     b.locale.setLocale('en')
+     expect(resolveSlotLabel(b.slots.entries('settings.section')[0]!.options.label)).toBe('Models')
+@@ -240,19 +231,18 @@ describe('pushed invalidations', () => {
+     expect(loads).toHaveLength(1)
+   })
+ 
+-  it('routes pushed credential invalidation into the shared onboarding join', async () => {
++  it('routes pushed credential invalidation into the shared Models store', async () => {
+     const b = await bench()
+     declare(b.slots)
+     await b.ctx.plugin({ inject: [...inject], apply }).await()
+-    const entry = b.slots.entries('settings.onboarding')
+-      .find(candidate => candidate.options.id === 'deepseek-official')!
++    const entry = b.slots.entries('settings.section')
++      .find(candidate => candidate.options.id === 'models')!
+     const injected = (
+-      entry.inject as unknown as
+-      () => import('../src/client/DeepSeekOnboardingDialog.tsx').DeepSeekOnboardingInjected
++      entry.inject as unknown as () => import('../src/client/ModelsSection.tsx').ModelsSectionInjected
+     )()
+     injected.controller.store.update((state) => { state.status = 'ready' })
+     const load = vi.spyOn(injected.controller, 'load').mockResolvedValue()
+-    b.remote.emit('credentials/reference-updated', ['DEEPSEEK_API_KEY'])
++    b.remote.emit('credentials/reference-updated', ['SOME_API_KEY'])
+     expect(load).toHaveBeenCalledTimes(1)
+   })
+ 
+diff --git a/packages/client/ui-settings-models/tests/onboarding-dialog.client.spec.tsx b/packages/client/ui-settings-models/tests/onboarding-dialog.client.spec.tsx
+deleted file mode 100644
+index 392497d9b9..0000000000
+--- a/packages/client/ui-settings-models/tests/onboarding-dialog.client.spec.tsx
++++ /dev/null
+@@ -1,283 +0,0 @@
+-// @vitest-environment jsdom
+-/** First-run DeepSeek prompt behavior over the shared Models join. */
+-import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
+-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+-import { afterEach, describe, expect, it, vi } from 'vitest'
+-import Schema from '@deepseek-ai/schemastery'
+-import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
+-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+-import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+-import { DeepSeekOnboardingDialog } from '../src/client/DeepSeekOnboardingDialog.tsx'
+-import type { DeepSeekOnboardingDialogProps } from '../src/client/DeepSeekOnboardingDialog.tsx'
+-import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
+-import { ModelsSettingsStore } from '../src/client/store.ts'
+-import { createModelsOperations } from '../src/client/operations.ts'
+-import { en } from '../src/client/locales.ts'
+-import { settingsSchema } from './settings-schema.client.ts'
+-
+-// Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
+-const useResource = (() => ({ status: 'none' as const, value: undefined, failure: undefined, reload: () => {} })) as GlobalStandardProps['useResource']
+-const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({ activePanelId: null })
+-
+-afterEach(() => {
+-  cleanup()
+-  document.getElementById('root')?.remove()
+-})
+-
+-/** Credentials answers over the Remote carrier, which has no envelope. */
+-function remoteOk<T>(value: T) {
+-  return { ok: true as const, value }
+-}
+-function remoteFail(message: string) {
+-  return { ok: false as const, error: new RemoteError('gateway/internal', message, {}) }
+-}
+-
+-const DeepSeekConfig = Schema.object({
+-  apiKeyEnv: Schema.string().role('credential-ref'),
+-  baseURL: Schema.string().pattern(/^https:\/\//),
+-  reasoningEffort: Schema.union(['off', 'low', 'high', 'max']),
+-  defaultContextWindow: Schema.number().step(1).min(1),
+-  models: Schema.array(Schema.object({
+-    id: Schema.string().required(),
+-    name: Schema.string(),
+-    description: Schema.string(),
+-    contextWindow: Schema.number().step(1).min(1),
+-  })),
+-})
+-
+-type AttentionSnapshot = Parameters<Parameters<DeepSeekOnboardingDialogProps['useSessionStatus']>[0]>[0]
+-const noAttention: AttentionSnapshot = new Map()
+-const useSessionStatus: DeepSeekOnboardingDialogProps['useSessionStatus'] = selector => selector(noAttention)
+-
+-function deepSeekNamespace(apiKeyEnv: string | null): SettingsNamespaceView {
+-  const value = apiKeyEnv === null ? {} : { apiKeyEnv }
+-  return {
+-    ns: 'llm-deepseek',
+-    schema: JSON.parse(JSON.stringify(DeepSeekConfig.toJSON())) as JsonValue,
+-    value,
+-    base: value,
+-    user: {},
+-    applies: 'live',
+-    secrets: [],
+-    revision: 0,
+-  }
+-}
+-
+-function harness(options: {
+-  provider?: boolean
+-  providerSettingsNs?: string
+-  providerActive?: boolean
+-  settingsNamespace?: boolean
+-  apiKeyEnv?: string | null
+-  configured?: () => boolean
+-  credential?: { source?: string; writable: boolean }
+-  describeFailure?: string
+-  settingsWritable?: boolean
+-  providersFailure?: string
+-  setFailure?: string
+-} = {}) {
+-  if (document.getElementById('root') === null) {
+-    const appRoot = document.createElement('div')
+-    appRoot.id = 'root'
+-    document.body.append(appRoot)
+-  }
+-  let fileConfigured = false
+-  const configured = options.configured ?? (() => fileConfigured)
+-  const apiKeyEnv = options.apiKeyEnv === undefined ? 'DEEPSEEK_API_KEY' : options.apiKeyEnv
+-  const mutate = vi.fn(() => Promise.resolve(remoteOk(deepSeekNamespace(apiKeyEnv))))
+-  const set = vi.fn((_ref: string, _value: string) => {
+-    if (options.setFailure !== undefined) return Promise.resolve(remoteFail(options.setFailure))
+-    fileConfigured = true
+-    return Promise.resolve(remoteOk(undefined))
+-  })
+-  const face = {
+-    llm: {
+-      listProviders: () => {
+-        if (options.providersFailure !== undefined) return Promise.resolve(remoteFail(options.providersFailure))
+-        return Promise.resolve(remoteOk(
+-          options.provider === false || options.providerActive === false
+-            ? []
+-            : [{ id: 'deepseek-official', name: 'DeepSeek' }],
+-        ))
+-      },
+-      listConfigurableProviders: () => Promise.resolve(remoteOk(
+-        options.provider === false
+-          ? []
+-          : [{
+-            provider: 'deepseek-official',
+-            displayName: 'DeepSeek',
+-            settingsNs: options.providerSettingsNs ?? 'llm-deepseek',
+-            settingsPath: [],
+-          }],
+-      )),
+-      discoverModels: () => Promise.resolve(remoteOk([])),
+-    },
+-    settings: {
+-      describe: () => Promise.resolve(remoteOk({
+-        writable: options.settingsWritable ?? true,
+-        hasDocument: false,
+-        namespaces: options.settingsNamespace === false ? [] : [deepSeekNamespace(apiKeyEnv)],
+-      })),
+-      mutate,
+-    },
+-    credentials: {
+-      describe: () => options.describeFailure === undefined
+-        ? Promise.resolve(remoteOk({
+-          DEEPSEEK_API_KEY: {
+-            configured: configured(),
+-            ...configured() && options.credential?.source !== undefined
+-              ? { source: options.credential.source }
+-              : {},
+-            writable: options.credential?.writable ?? true,
+-          },
+-        }))
+-        : Promise.resolve(remoteFail(options.describeFailure)),
+-      set,
+-    },
+-  }
+-  // The page plugin's context, scripted down to the namespaces it reaches.
+-  const ctx = { remote: face } as never
+-  const operations = createModelsOperations(ctx)
+-  const controller = new ModelsSettingsStore(ctx, settingsSchema, new SettingsDescribeMirror(ctx))
+-  const openSection = vi.fn()
+-  const complete = vi.fn()
+-  const unusedHook = (() => { throw new Error('unused standard hook') }) as never
+-  const props: DeepSeekOnboardingDialogProps = {
+-    stepId: 'deepseek-official',
+-    complete,
+-    openSection,
+-    useSessions: unusedHook,
+-    useSessionStatus,
+-    usePanelInfo, useSessionRetainInfo: () => undefined, useResource,
+-    useWorkspaces: unusedHook,
+-    controller,
+-    useModels: bindSnapshotSelector(controller.store),
+-    operations,
+-    schema: settingsSchema,
+-    t: key => en[key],
+-  }
+-  return {
+-    controller, complete, openSection, props, mutate, set,
+-    configure: () => { fileConfigured = true },
+-  }
+-}
+-
+-describe('DeepSeekOnboardingDialog', () => {
+-  it('renders when the shell root is absent', async () => {
+-    const h = harness()
+-    document.getElementById('root')!.remove()
+-    render(<DeepSeekOnboardingDialog {...h.props} />)
+-    expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
+-  })
+-
+-  it('loads a credential-only modal, inerts the product, and focuses the key', async () => {
+-    const h = harness()
+-    render(<DeepSeekOnboardingDialog {...h.props} />)
+-    expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
+-    expect(document.getElementById('root')?.inert).toBe(true)
+-    expect(screen.getByText(en.onboardingDescription)).toBeTruthy()
+-    const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
+-    await waitFor(() => { expect(document.activeElement).toBe(key) })
+-    expect(screen.queryByText(en.customized)).toBeNull()
+-  })
+-
+-  it('cannot be dismissed implicitly and restores the previous inert state', async () => {
+-    const h = harness()
+-    const appRoot = document.getElementById('root')!
+-    appRoot.inert = true
+-    const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+-    await screen.findByRole('dialog')
+-
+-    fireEvent.keyDown(document, { key: 'Escape' })
+-    fireEvent.click(document.querySelector('[class*="mask"]')!)
+-    expect(screen.getByRole('dialog')).toBeTruthy()
+-    expect(h.complete).not.toHaveBeenCalled()
+-
+-    view.unmount()
+-    expect(appRoot.inert).toBe(true)
+-  })
+-
+-  it('requires a non-blank key before Save and continue is available', async () => {
+-    const h = harness()
+-    render(<DeepSeekOnboardingDialog {...h.props} />)
+-    await screen.findByRole('dialog')
+-    const save = screen.getByRole<HTMLButtonElement>('button', { name: en.onboardingSave })
+-    expect(save.disabled).toBe(true)
+-    fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: '   ' } })
+-    expect(save.disabled).toBe(true)
+-    expect(screen.getByText(en.keyRequired)).toBeTruthy()
+-    expect(h.set).not.toHaveBeenCalled()
+-  })
+-
+-  it('keeps the modal open and reports a refused credential write', async () => {
+-    for (const [options, message] of [
+-      [{ setFailure: 'credential was rejected' }, 'credential was rejected'],
+-    ] as const) {
+-      const h = harness(options)
+-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+-      await screen.findByRole('dialog')
+-      fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'sk-live' } })
+-      fireEvent.click(screen.getByRole('button', { name: en.onboardingSave }))
+-      expect(await screen.findByText(message)).toBeTruthy()
+-      expect(screen.getByRole('dialog')).toBeTruthy()
+-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.onboardingSave }).disabled).toBe(false)
+-      expect(h.complete).not.toHaveBeenCalled()
+-      expect(h.mutate).not.toHaveBeenCalled()
+-      view.unmount()
+-    }
+-  })
+-
+-  it('allows configure-later dismissal without opening settings', async () => {
+-    const h = harness()
+-    render(<DeepSeekOnboardingDialog {...h.props} />)
+-    await screen.findByRole('dialog')
+-    fireEvent.click(screen.getByRole('button', { name: en.onboardingLater }))
+-    expect(h.complete).toHaveBeenCalledOnce()
+-    expect(h.openSection).not.toHaveBeenCalled()
+-    expect(h.set).not.toHaveBeenCalled()
+-    expect(h.mutate).not.toHaveBeenCalled()
+-  })
+-
+-  it('does not block the product when DeepSeek setup is unavailable', async () => {
+-    for (const h of [
+-      harness({ describeFailure: 'credentials service is absent' }),
+-      harness({ credential: { writable: false } }),
+-      harness({ settingsWritable: false }),
+-      harness({ providersFailure: 'the provider directory is unavailable' }),
+-      harness({ providerActive: false }),
+-      harness({ settingsNamespace: false }),
+-      harness({ apiKeyEnv: null }),
+-    ]) {
+-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+-      await act(async () => { await h.controller.load() })
+-      expect(screen.queryByRole('dialog')).toBeNull()
+-      await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
+-      expect(h.openSection).not.toHaveBeenCalled()
+-      view.unmount()
+-    }
+-  })
+-
+-  it('skips an absent adapter and an already-configured environment credential', async () => {
+-    for (const h of [
+-      harness({ provider: false }),
+-      harness({ providerSettingsNs: '' }),
+-      harness({ configured: () => true, credential: { source: 'env', writable: false } }),
+-    ]) {
+-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+-      await act(async () => { await h.controller.load() })
+-      expect(screen.queryByRole('dialog')).toBeNull()
+-      await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
+-      view.unmount()
+-    }
+-  })
+-
+-  it('closes when an external credential invalidation refreshes the shared join', async () => {
+-    const h = harness()
+-    render(<DeepSeekOnboardingDialog {...h.props} />)
+-    await screen.findByRole('dialog')
+-    h.configure()
+-    await act(async () => { await h.controller.load() })
+-    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
+-    expect(h.complete).toHaveBeenCalledOnce()
+-  })
+-})
+diff --git a/packages/client/ui-settings-models/tests/readiness.client.spec.ts b/packages/client/ui-settings-models/tests/readiness.client.spec.ts
+index 3bea0c072d..a002b48354 100644
+--- a/packages/client/ui-settings-models/tests/readiness.client.spec.ts
++++ b/packages/client/ui-settings-models/tests/readiness.client.spec.ts
+@@ -1,30 +1,12 @@
+-/** Pure first-run readiness projection over the shared Models join. */
++/** Pure provider-usability projection over the shared Models join. */
+ import { describe, expect, it } from 'vitest'
+ import type { CredentialInfo } from '@deepseek-ai/dsh-api-remotes/client'
+-import type { ModelsSettingsState, ProviderRow } from '../src/client/store.ts'
+-import { onboardingReadiness, providerUsable } from '../src/client/store.ts'
++import type { ProviderRow } from '../src/client/store.ts'
++import { providerUsable } from '../src/client/store.ts'
+ 
+ const missingCredential: CredentialInfo = { configured: false, writable: true }
+ 
+ function row(overrides: Partial<ProviderRow> = {}): ProviderRow {
+-  return {
+-    entry: {
+-      provider: 'deepseek-official',
+-      displayName: 'DeepSeek',
+-      settingsNs: 'llm-deepseek',
+-      settingsPath: [],
+-      active: true,
+-    },
+-    configured: true,
+-    removable: false,
+-    apiKeyEnv: 'DEEPSEEK_API_KEY',
+-    credential: missingCredential,
+-    ...overrides,
+-  }
+-}
+-
+-/** A second provider the user configured themselves. */
+-function otherRow(overrides: Partial<ProviderRow> = {}): ProviderRow {
+   return {
+     entry: {
+       provider: 'hfai',
+@@ -41,90 +23,15 @@ function otherRow(overrides: Partial<ProviderRow> = {}): ProviderRow {
+   }
+ }
+ 
+-function state(overrides: Partial<ModelsSettingsState> = {}): ModelsSettingsState {
+-  return {
+-    status: 'ready',
+-    error: null,
+-    credentialError: null,
+-    writable: true,
+-    rows: [row()],
+-    namespaces: new Map(),
+-    ...overrides,
+-  }
+-}
+-
+ describe('providerUsable', () => {
+   it('requires a registered route and a stored key for every named reference', () => {
+-    expect(providerUsable(otherRow())).toBe(true)
+-    expect(providerUsable(otherRow({ entry: { ...otherRow().entry, active: false } }))).toBe(false)
+-    expect(providerUsable(otherRow({ credential: missingCredential }))).toBe(false)
+-    expect(providerUsable(otherRow({ credential: undefined }))).toBe(false)
++    expect(providerUsable(row())).toBe(true)
++    expect(providerUsable(row({ entry: { ...row().entry, active: false } }))).toBe(false)
++    expect(providerUsable(row({ credential: missingCredential }))).toBe(false)
++    expect(providerUsable(row({ credential: undefined }))).toBe(false)
+   })
+ 
+   it('treats a reference-free registered route as provider-native authentication', () => {
+-    expect(providerUsable(otherRow({ apiKeyEnv: undefined, credential: undefined }))).toBe(true)
+-  })
+-})
+-
+-describe('onboardingReadiness', () => {
+-  it('waits for the first join and skips onboarding when the adapter directory entry is absent', () => {
+-    expect(onboardingReadiness(state({ status: 'idle', rows: [] }))).toEqual({ kind: 'loading' })
+-    expect(onboardingReadiness(state({ status: 'loading', rows: [] }))).toEqual({ kind: 'loading' })
+-    expect(onboardingReadiness(state({ rows: [] }))).toEqual({ kind: 'adapter-absent' })
+-    expect(onboardingReadiness(state({
+-      rows: [row({
+-        entry: {
+-          ...row().entry,
+-          settingsNs: '',
+-        },
+-      })],
+-    }))).toEqual({ kind: 'adapter-absent' })
+-  })
+-
+-  it('reports a missing writable effective credential', () => {
+-    expect(onboardingReadiness(state())).toEqual({ kind: 'credential-missing' })
+-  })
+-
+-  it('ends onboarding once any other registered provider can serve requests', () => {
+-    expect(onboardingReadiness(state({ rows: [row(), otherRow()] }))).toEqual({ kind: 'provider-ready' })
+-    // A provider the user cannot reach yet leaves the prompt in place.
+-    expect(onboardingReadiness(state({
+-      rows: [row(), otherRow({ credential: missingCredential })],
+-    }))).toEqual({ kind: 'credential-missing' })
+-  })
+-
+-  it('accepts file and process-environment credentials without prompting', () => {
+-    expect(onboardingReadiness(state({
+-      rows: [row({ credential: { configured: true, source: 'file', writable: true } })],
+-    }))).toEqual({ kind: 'provider-ready' })
+-    expect(onboardingReadiness(state({
+-      rows: [row({ credential: { configured: true, source: 'env', writable: false } })],
+-    }))).toEqual({ kind: 'provider-ready' })
+-  })
+-
+-  it('turns missing capabilities into diagnostics that never block the product', () => {
+-    expect(onboardingReadiness(state({ status: 'error', error: 'settings down' }))).toEqual({
+-      kind: 'unavailable',
+-      reason: 'load-failed',
+-    })
+-    expect(onboardingReadiness(state({
+-      rows: [row({ entry: { ...row().entry, active: false } })],
+-    }))).toEqual({ kind: 'unavailable', reason: 'provider-inactive' })
+-    expect(onboardingReadiness(state({
+-      credentialError: 'credentials service is absent',
+-    }))).toEqual({
+-      kind: 'unavailable',
+-      reason: 'credentials-unavailable',
+-    })
+-    expect(onboardingReadiness(state({
+-      rows: [row({ credential: undefined })],
+-    }))).toEqual({ kind: 'unavailable', reason: 'credentials-unavailable' })
+-    expect(onboardingReadiness(state({
+-      rows: [row({ credential: { configured: false, writable: false } })],
+-    }))).toEqual({ kind: 'unavailable', reason: 'credential-read-only' })
+-    expect(onboardingReadiness(state({ writable: false }))).toEqual({
+-      kind: 'unavailable',
+-      reason: 'settings-read-only',
+-    })
++    expect(providerUsable(row({ apiKeyEnv: undefined, credential: undefined }))).toBe(true)
+   })
+ })
+diff --git a/packages/core/agent-default-model/README.md b/packages/core/agent-default-model/README.md
+index df8b9c37ea..fcdb81f131 100644
+--- a/packages/core/agent-default-model/README.md
++++ b/packages/core/agent-default-model/README.md
+@@ -29,7 +29,7 @@ Mount this package wherever agents are created without an explicit model route.
+ 
+ ### Configure the default
+ 
+-The composition entry is the base of the default: it requires a provider and model and stays usable without any settings provider.
++The composition entry is the base of the default: `provider` and `model` are optional, so a provider-agnostic composition can omit them and leave fresh agents without a default until the user selects one. The entry stays usable without any settings provider.
+ 
+ ```yaml
+ - name: '@deepseek-ai/dsh-agent-default-model'
+@@ -40,14 +40,14 @@ The composition entry is the base of the default: it requires a provider and mod
+ 
+ | Field | Default | Meaning |
+ |---|---|---|
+-| `provider` | required | Registered provider route for fresh agents |
+-| `model` | required | Provider-owned model id for fresh agents |
++| `provider` | optional | Registered provider route for fresh agents; omitted means no default |
++| `model` | optional | Provider-owned model id for fresh agents; omitted means no default |
+ 
+ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-default-model) is the exhaustive source for every accepted field. `reasoningEffort` is deliberately not a config field: it belongs to the settings layer, so a complete saved selection can clear an effort when the next selected model has none, while a composition value would be inherited again.
+ 
+ ### Read and change the default
+ 
+-`currentSelection()` returns a detached `{ provider, model, reasoningEffort? }` for a newly created agent; `saveSelection()` stores the complete selection for later agents.
++`currentSelection()` returns a detached `{ provider, model, reasoningEffort? }` for a newly created agent, or `undefined` when no default is set; `saveSelection()` stores the complete selection for later agents.
+ 
+ ```text
+ const selection = ctx.agentDefaultModel.currentSelection()
+diff --git a/packages/core/agent-default-model/src/index.ts b/packages/core/agent-default-model/src/index.ts
+index 82e4e0da6d..d19df4eaab 100644
+--- a/packages/core/agent-default-model/src/index.ts
++++ b/packages/core/agent-default-model/src/index.ts
+@@ -22,31 +22,32 @@ export const AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = 'agent-default-model'
+ 
+ /** Stored and composed default model selection. */
+ export interface AgentDefaultModelSettings {
+-  /** Registered provider route. */
+-  provider: string
+-  /** Provider-owned model id. */
+-  model: string
++  /** Registered provider route; omitted when no default is selected. */
++  provider?: string
++  /** Provider-owned model id; omitted when no default is selected. */
++  model?: string
+   /** Adapter-owned reasoning effort, or provider/default behavior when absent. */
+   reasoningEffort?: string
+ }
+ 
+ /** Schema of the default Agent model settings section. */
+ export const AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA: z<AgentDefaultModelSettings> = z.object({
+-  provider: z.string().required(),
+-  model: z.string().required(),
++  provider: z.string(),
++  model: z.string(),
+   reasoningEffort: z.string(),
+ })
+ 
+-/** Composition entry for the default model selection. */
++/** Composition entry for the default model selection; both fields optional for a provider-agnostic default. */
+ export interface Config {
+   /** Registered provider route. */
+-  provider: string
++  provider?: string
+   /** Provider-owned model id. */
+-  model: string
++  model?: string
+ }
+ 
+-/** Project stored settings onto the Agent-facing selection type. */
+-function selection(settings: AgentDefaultModelSettings): ModelSelection {
++/** Project stored settings onto the Agent-facing selection type; a partial selection yields `undefined`. */
++function selection(settings: AgentDefaultModelSettings): ModelSelection | undefined {
++  if (settings.provider === undefined || settings.model === undefined) return undefined
+   return {
+     provider: settings.provider,
+     model: settings.model,
+@@ -63,15 +64,18 @@ function selection(settings: AgentDefaultModelSettings): ModelSelection {
+  */
+ export class AgentDefaultModelConfig extends Service {
+   static Config: z<Config> = z.object({
+-    provider: z.string().required(),
+-    model: z.string().required(),
++    provider: z.string(),
++    model: z.string(),
+   })
+ 
+   private source: () => AgentDefaultModelSettings
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentDefaultModel')
+-    const entry: AgentDefaultModelSettings = { provider: config.provider, model: config.model }
++    const entry: AgentDefaultModelSettings = {
++      ...config.provider === undefined ? {} : { provider: config.provider },
++      ...config.model === undefined ? {} : { model: config.model },
++    }
+     this.source = () => entry
+     ctx.inject(['settings'], (settingsCtx) => {
+       settingsCtx.settings.installSection(ctx, AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, entry, {
+@@ -85,9 +89,9 @@ export class AgentDefaultModelConfig extends Service {
+ 
+   /**
+    * Read the current default model selection.
+-   * @returns a detached provider, model, and optional reasoning selection.
++   * @returns a detached provider, model, and optional reasoning selection, or `undefined` when none is set.
+    */
+-  currentSelection(): ModelSelection {
++  currentSelection(): ModelSelection | undefined {
+     return selection(this.source())
+   }
+ 
+diff --git a/packages/core/agent-default-model/tests/agent-default-model.spec.ts b/packages/core/agent-default-model/tests/agent-default-model.spec.ts
+index b16091d809..930e0380b5 100644
+--- a/packages/core/agent-default-model/tests/agent-default-model.spec.ts
++++ b/packages/core/agent-default-model/tests/agent-default-model.spec.ts
+@@ -80,7 +80,7 @@ describe('AgentDefaultModelConfig', () => {
+   it('falls back to the composition entry when the settings provider detaches', async () => {
+     const bench = await boot()
+     await bench.defaultModel.saveSelection({ provider: 'acme-gateway', model: 'acme-large' })
+-    expect(bench.defaultModel.currentSelection().provider).toBe('acme-gateway')
++    expect(bench.defaultModel.currentSelection()!.provider).toBe('acme-gateway')
+     await bench.settingsFiber.dispose()
+     expect(bench.defaultModel.currentSelection()).toEqual({
+       provider: 'deepseek-official', model: 'deepseek-v4-flash',
+diff --git a/packages/identity/anonymous-user-id/README.md b/packages/identity/anonymous-user-id/README.md
+index c1c6950e7e..330528828c 100644
+--- a/packages/identity/anonymous-user-id/README.md
++++ b/packages/identity/anonymous-user-id/README.md
+@@ -33,7 +33,7 @@ Three things your installation sends out carry the same id, so records line up a
+ 
+ - **Session telemetry** — your telemetry exports carry the id as the `user.id` resource attribute, so a collector can group an installation's records.
+ - **Feedback** — each feedback acknowledgement names the anonymous installation that recorded it.
+-- **DeepSeek requests** — every provider request carries the `x-deepseek-harness-user-id` header, so usage can be attributed per installation.
++- **DeepSeek requests** — when `sendAnonymousUserId` is enabled, each provider request carries the `x-deepseek-harness-user-id` header, so usage can be attributed per installation. It is off by default, and no id is minted when it is off.
+ 
+ ### Observing and resetting the id
+ 
+@@ -41,7 +41,7 @@ The id lives in `$DSH_HOME/.anonymous-user-id` (`$DSH_HOME` defaults to `~/.dsh`
+ 
+ ### Using it in your own package
+ 
+-When you build a feature that should share the installation's anonymous id, import the value once and reuse it — telemetry, feedback, and DeepSeek already use the same id, so your records line up with theirs:
++When you build a feature that should share the installation's anonymous id, import the value once and reuse it — telemetry and feedback already use the same id, and DeepSeek does when `sendAnonymousUserId` is enabled, so your records line up with theirs:
+ 
+ ```ts
+ import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
+@@ -121,7 +121,7 @@ These limits describe when the id is a poor fit or needs special attention. They
+ - **No recovery after deletion** — losing the file mints a new anonymous identity by design; recovery would require stable derivation material that weakens anonymity.
+ - **Best-effort concurrency** — a reader landing in the narrow interval between a concurrent process's exclusive create and completed write can use a different in-memory UUID for that run; later launches converge on the persisted value.
+ - **No cross-home identity** — different `$DSH_HOME` values cannot be correlated.
+-- **Configured DeepSeek gateways receive the id** — `dsh-llm-deepseek` sends the stable header to its resolved `baseURL`, including deployment overrides, independently of telemetry sharing mode.
++- **Configured DeepSeek gateways receive the id only when enabled** — `dsh-llm-deepseek` sends the stable header to its resolved `baseURL`, including deployment overrides, only when `sendAnonymousUserId` is `true` (default `false`).
+ - **Deleting the file does not reset the current process** — memoization keeps the run's id until the next launch.
+ 
+ <a id="dev-note"></a>
+diff --git a/packages/llm/llm-deepseek/README.md b/packages/llm/llm-deepseek/README.md
+index 18f1b3de48..c3bbec4217 100644
+--- a/packages/llm/llm-deepseek/README.md
++++ b/packages/llm/llm-deepseek/README.md
+@@ -69,6 +69,7 @@ A request selects the route with `provider: deepseek-official`; the model id pas
+ | `fileRefreshMarginSeconds` | `3,600` | Remaining reuse lifetime below which an id is replaced |
+ | `fileQuotaCleanupBatch` | `100` | Oldest harness-owned files removed before one quota retry |
+ | `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
++| `sendAnonymousUserId` | `false` | When `true`, each authorized request carries the anonymous `x-deepseek-harness-user-id` installation id |
+ 
+ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-deepseek) is the exhaustive source for every accepted field and its JSDoc.
+ 
+@@ -141,7 +142,7 @@ The plugin is built on one explicit resolve step and one registration fact. `res
+ 
+ ### Wire flow
+ 
+-One `stream()` call normally makes one model request: resolve deterministic request images, prefer Files ids, prepare any registered top-level request extensions, fetch from the resolved `baseURL`, accept extension transactions after HTTP 2xx, and translate the SSE stream into the harness protocol. File-resolution failure makes the first request inline; a provider stale-file response permits one replacement attempt, also inline if replacement resolution fails. Every model and Files call carries shared attribution. Model requests also carry the stable anonymous user id outside model input, plus a session id when present. Reasoning history is serialized back when required, and cache accounting maps DeepSeek's cache-hit metrics into harness usage.
++One `stream()` call normally makes one model request: resolve deterministic request images, prefer Files ids, prepare any registered top-level request extensions, fetch from the resolved `baseURL`, accept extension transactions after HTTP 2xx, and translate the SSE stream into the harness protocol. File-resolution failure makes the first request inline; a provider stale-file response permits one replacement attempt, also inline if replacement resolution fails. Every model and Files call carries shared attribution. Model requests also carry a session id when present, and — only when `sendAnonymousUserId` is enabled — the stable anonymous user id outside model input. Reasoning history is serialized back when required, and cache accounting maps DeepSeek's cache-hit metrics into harness usage.
+ 
+ </details>
+ 
+diff --git a/packages/llm/llm-deepseek/src/common/types.ts b/packages/llm/llm-deepseek/src/common/types.ts
+index d1c4932317..1e6240afc2 100644
+--- a/packages/llm/llm-deepseek/src/common/types.ts
++++ b/packages/llm/llm-deepseek/src/common/types.ts
+@@ -85,6 +85,8 @@ export interface DeepSeekConnectionOptions {
+   filePolicy: DeepSeekFilePolicy
+   /** Provider-owned model-request retry policy, already resolved. */
+   retryPolicy: ResolvedRetryPolicy
++  /** Whether requests carry the anonymous `x-deepseek-harness-user-id` header. */
++  sendAnonymousUserId: boolean
+ }
+ 
+ /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
+@@ -100,8 +102,8 @@ export interface DeepSeekAdapterOptions {
+    * `MISSING_CREDENTIAL` when no key is available anywhere.
+    */
+   resolveApiKey: (connection: DeepSeekConnectionOptions) => Promise<string>
+-  /** Resolve the harness-home anonymous id shared with telemetry and feedback. */
+-  resolveUserId: () => AnonymousUserId
++  /** Resolve the harness-home anonymous id shared with telemetry and feedback; `undefined` omits the header. */
++  resolveUserId: () => AnonymousUserId | undefined
+   /** Resolve the current durable attachment service; absence rejects image input. */
+   resolveAttachments?: () => AttachmentStore | undefined
+   /** Bridge one attachment reference into the current model-tool execution world. */
+diff --git a/packages/llm/llm-deepseek/src/config.ts b/packages/llm/llm-deepseek/src/config.ts
+index 3bf9f5a6d2..ee8ba2a2e1 100644
+--- a/packages/llm/llm-deepseek/src/config.ts
++++ b/packages/llm/llm-deepseek/src/config.ts
+@@ -63,6 +63,12 @@ export interface Config {
+   fileQuotaCleanupBatch?: number
+   /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+   retryPolicy?: RetryPolicyConfig
++  /**
++   * Whether each authorized request carries the `x-deepseek-harness-user-id`
++   * header with the harness home's anonymous installation id. Defaults to
++   * `false`: no per-installation identifier is sent unless this is enabled.
++   */
++  sendAnonymousUserId?: boolean
+ }
+ 
+ const catalogModel: z<DeepSeekCatalogModel> = z.object({
+@@ -98,6 +104,7 @@ export const Config: z<Config> = z.object({
+   fileRefreshMarginSeconds: z.number().step(1).min(0).default(DEFAULT_FILE_REFRESH_MARGIN_SECONDS),
+   fileQuotaCleanupBatch: z.number().step(1).min(1).max(1_000).default(DEFAULT_FILE_QUOTA_CLEANUP_BATCH),
+   retryPolicy: RetryPolicySchema,
++  sendAnonymousUserId: z.boolean().default(false),
+ })
+ 
+ /** Public API default; the internal endpoint comes from $DEEPSEEK_BASE_URL. */
+@@ -322,5 +329,6 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
+       quotaCleanupBatch: fileQuotaCleanupBatch,
+     },
+     retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-deepseek: retryPolicy'),
++    sendAnonymousUserId: config.sendAnonymousUserId ?? false,
+   }
+ }
+diff --git a/packages/llm/llm-deepseek/src/index.ts b/packages/llm/llm-deepseek/src/index.ts
+index d38246b971..0b56b9168d 100644
+--- a/packages/llm/llm-deepseek/src/index.ts
++++ b/packages/llm/llm-deepseek/src/index.ts
+@@ -105,7 +105,12 @@ export function apply(ctx: Context, config: Config): void {
+   }
+ 
+   let userId: AnonymousUserId | undefined
+-  const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()
++  // Only mint (and therefore persist) the anonymous id when a deployment
++  // opts in to sending it; disabled is the default and leaves no file behind.
++  const resolveUserId = (): AnonymousUserId | undefined => {
++    if (!options().sendAnonymousUserId) return undefined
++    return userId ??= getOrCreateAnonymousUserId()
++  }
+   const adapter = new DeepSeekAdapter({
+     options,
+     onReplayDegrade: ({ provider, model, reason }) => {
+diff --git a/packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts b/packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts
+index 3d2e50ea45..b12aaa6ae9 100644
+--- a/packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts
++++ b/packages/llm/llm-deepseek/src/protocols/chat-completions/adapter.ts
+@@ -250,7 +250,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
+     signal: AbortSignal,
+     connection: DeepSeekConnectionOptions,
+     apiKey: string,
+-    userId: AnonymousUserId,
++    userId: AnonymousUserId | undefined,
+     attachments: AttachmentStore | undefined,
+     onActivity: () => void,
+   ): AsyncIterable<StreamChunk> {
+@@ -259,7 +259,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
+       'content-type': 'application/json',
+       'accept': 'text/event-stream',
+       ...attributionHeaders(),
+-      'x-deepseek-harness-user-id': String(userId),
++      ...userId === undefined ? {} : { 'x-deepseek-harness-user-id': String(userId) },
+       ...options.sessionId !== undefined
+         ? { 'x-deepseek-harness-session-id': String(options.sessionId) }
+         : {},
+diff --git a/packages/llm/llm-deepseek/src/protocols/messages/adapter.ts b/packages/llm/llm-deepseek/src/protocols/messages/adapter.ts
+index e5304b8380..5ff4697e22 100644
+--- a/packages/llm/llm-deepseek/src/protocols/messages/adapter.ts
++++ b/packages/llm/llm-deepseek/src/protocols/messages/adapter.ts
+@@ -23,8 +23,8 @@ export interface AdapterDependencies {
+   connection(): Connection
+   /** Resolve the key named by that same generation. */
+   apiKey(connection: Connection): Promise<string>
+-  /** Stable anonymous Harness identity. */
+-  userId(): string
++  /** Stable anonymous Harness identity; `undefined` omits the header. */
++  userId(): string | undefined
+   /** Current attachment service; absence is valid for text requests. */
+   attachments(): AttachmentStore | undefined
+   /** Current execution-world attachment path. */
+@@ -119,6 +119,7 @@ export class DeepSeekMessagesAdapter extends LlmAdapter {
+         ...options.purpose === undefined ? {} : { purpose: options.purpose },
+       }, this.dependencies.prepareExtensions)
+       signal.throwIfAborted()
++      const userId = this.dependencies.userId()
+       const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
+         method: 'POST', signal, body: extensions.payload, redirect: 'error',
+         headers: {
+@@ -126,7 +127,7 @@ export class DeepSeekMessagesAdapter extends LlmAdapter {
+           'content-type': 'application/json', 'accept': 'text/event-stream',
+           'x-api-key': key, 'anthropic-version': '2023-06-01',
+           ...fileIds === undefined || fileIds.size === 0 ? {} : { 'anthropic-beta': MESSAGES_FILES_BETA },
+-          'x-deepseek-harness-user-id': this.dependencies.userId(),
++          ...userId === undefined ? {} : { 'x-deepseek-harness-user-id': userId },
+           ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
+           ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
+         },
+diff --git a/packages/llm/llm-deepseek/tests/adapter.spec.ts b/packages/llm/llm-deepseek/tests/adapter.spec.ts
+index 767c0d5c73..eac7a1a830 100644
+--- a/packages/llm/llm-deepseek/tests/adapter.spec.ts
++++ b/packages/llm/llm-deepseek/tests/adapter.spec.ts
+@@ -49,7 +49,7 @@ async function harness(baseURL: string, config: object = {}) {
+   const ctx = new Context()
+   await ctx.plugin(LlmRuntime)
+   await ctx.plugin(DeepSeekLlmApiExtensionRegistry)
+-  await ctx.plugin(LlmDeepSeek, { protocol: 'chat-completions', baseURL, ...config })
++  await ctx.plugin(LlmDeepSeek, { protocol: 'chat-completions', baseURL, sendAnonymousUserId: true, ...config })
+   return ctx
+ }
+ 
+diff --git a/packages/llm/llm-deepseek/tests/dynamic-config.spec.ts b/packages/llm/llm-deepseek/tests/dynamic-config.spec.ts
+index 505d933a61..dabb64a1d0 100644
+--- a/packages/llm/llm-deepseek/tests/dynamic-config.spec.ts
++++ b/packages/llm/llm-deepseek/tests/dynamic-config.spec.ts
+@@ -165,7 +165,8 @@ describe('request-level dynamic configuration', () => {
+     await ctx.credentials.set(KEY_REF, 'sk-arrived')
+     await prompt(ctx)
+     expect(server.headers[0]?.authorization).toBe('Bearer sk-arrived')
+-    await expect(access(join(dir, '.anonymous-user-id'))).resolves.toBeUndefined()
++    // The anonymous id is opt-in; an ordinary request leaves no identity file.
++    await expect(access(join(dir, '.anonymous-user-id'))).rejects.toMatchObject({ code: 'ENOENT' })
+   })
+ 
+   it('rejects a stored credential no header can carry, never echoing it in the failure', async () => {
+diff --git a/packages/llm/llm-deepseek/tests/loader-composition.spec.ts b/packages/llm/llm-deepseek/tests/loader-composition.spec.ts
+index 146fd111d4..5fa3ce8844 100644
+--- a/packages/llm/llm-deepseek/tests/loader-composition.spec.ts
++++ b/packages/llm/llm-deepseek/tests/loader-composition.spec.ts
+@@ -22,7 +22,6 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+ import { credentialRef } from '@deepseek-ai/dsh-credentials'
+ import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
+ import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
+-import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
+ import DeepSeekLlmApiExtensionRegistry from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+ import * as SessionLogDeepSeek from '@deepseek-ai/dsh-session-log-deepseek'
+ import * as DeepSeekPluginPackageInventory from '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+@@ -211,7 +210,7 @@ describe('llm-deepseek real dynamic composition', () => {
+     expect(ctx.get('settings')!.describe().map(entry => entry.ns)).toEqual([NS])
+     await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+     expect(serverA.headers[0]?.authorization).toBe('Bearer boot-key')
+-    expect(serverA.headers[0]?.['x-deepseek-harness-user-id']).toBe(getOrCreateAnonymousUserId())
++    expect(serverA.headers[0]?.['x-deepseek-harness-user-id']).toBeUndefined()
+ 
+     // External edits, exactly as a user or the web UI would leave them on disk.
+     await writeFile(settingsPath, `llm-deepseek:\n  baseURL: ${serverB.url}\n`)
+diff --git a/packages/session/session-telemetry-otel/README.md b/packages/session/session-telemetry-otel/README.md
+index 35dc351bd5..5acacefa92 100644
+--- a/packages/session/session-telemetry-otel/README.md
++++ b/packages/session/session-telemetry-otel/README.md
+@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
+ 
+ ## Summary
+ 
+-`dsh-session-telemetry-otel` exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers, including `deepseek-official`. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. `DISABLED` constructs no transport. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules.
++`dsh-session-telemetry-otel` is off by default: `DISABLED` constructs no transport and no telemetry record leaves the process. A deployment opts in with `FEEDBACK_ONLY`, which exports session records through the OTel JS SDK only after new explicit feedback, for all users and providers. `FEEDBACK_ONLY` releases the canonical prefix through that feedback, including context; later records wait for the next explicit feedback. SDK batching can finish an authorized upload without another user interaction or model call. Deployments own their redaction rules.
+ 
+ ## Table of Contents
+ 
+@@ -31,8 +31,8 @@ Mount this plugin when a deployment should export session records through OpenTe
+ 
+ | `mode` | Behavior |
+ |---|---|
+-| `FEEDBACK_ONLY` | Default. Text feedback, rating creation/edit, note edit, and withdrawal release the unhanded prefix through that canonical feedback event; later records wait |
+-| `DISABLED` | No coordinator, provider, processor, or exporter is constructed; no telemetry record leaves the process. Live feedback warns locally; cold mutations stay silent |
++| `DISABLED` | Default. No coordinator, provider, processor, or exporter is constructed; no telemetry record leaves the process. Live feedback warns locally; cold mutations stay silent |
++| `FEEDBACK_ONLY` | Opt-in. Text feedback, rating creation/edit, note edit, and withdrawal release the unhanded prefix through that canonical feedback event; later records wait |
+ 
+ Programmatic TypeScript configuration uses the exported `SessionTelemetryMode` enum; raw string literals are not assignable. `FULL` is rejected, not an alias. The [`sharing` property](../session-telemetry/README.md#the-sharing-disclosure) reports `feedback-only` or `disabled`, not a delivery receipt. The `/feedback` acknowledgement confirms recording only.
+ 
+@@ -44,7 +44,7 @@ Uploading modes require an exporter URL and accept the SDK option blocks verbati
+ - id: sessionTelemetry-otel
+   name: '@deepseek-ai/dsh-session-telemetry-otel'
+   config:
+-    mode: FEEDBACK_ONLY       # optional; defaults to FEEDBACK_ONLY
++    mode: FEEDBACK_ONLY       # optional; defaults to DISABLED
+     shutdownTimeoutMillis: 3000 # optional; defaults to 3000
+     exporter:                # passed verbatim to the SDK's OTLP/HTTP log exporter
+       url: https://collector.example.com/v1/logs
+@@ -55,7 +55,7 @@ Uploading modes require an exporter URL and accept the SDK option blocks verbati
+ 
+ | Field | Default | Meaning |
+ |---|---|---|
+-| `mode` | `FEEDBACK_ONLY` | Sharing policy: `FEEDBACK_ONLY` or `DISABLED` |
++| `mode` | `DISABLED` | Sharing policy: `FEEDBACK_ONLY` or `DISABLED` |
+ | `exporter.url` | required in uploading modes | Full OTLP logs endpoint; must parse as `http(s)` |
+ | `exporter`, `processor` | — | Passed verbatim to the SDK exporter and batch processor |
+ | `shutdownTimeoutMillis` | `3,000` | Outer deadline for the SDK's complete shutdown sequence |
+diff --git a/packages/session/session-telemetry-otel/src/index.ts b/packages/session/session-telemetry-otel/src/index.ts
+index 48792dbe67..50ccb2ec88 100644
+--- a/packages/session/session-telemetry-otel/src/index.ts
++++ b/packages/session/session-telemetry-otel/src/index.ts
+@@ -48,8 +48,8 @@ export enum SessionTelemetryMode {
+   DISABLED = 'DISABLED',
+ }
+ 
+-/** Default session-sharing policy for schema and direct construction. */
+-export const DEFAULT_TELEMETRY_MODE = SessionTelemetryMode.FEEDBACK_ONLY
++/** Default session-sharing policy for schema and direct construction: nothing uploads unless a composition opts in. */
++export const DEFAULT_TELEMETRY_MODE = SessionTelemetryMode.DISABLED
+ 
+ const DISABLED_FEEDBACK_WARNING = 'OpenTelemetry session upload is DISABLED; this feedback is not uploaded through OpenTelemetry'
+ const NON_CANONICAL_EVENT_WARNING = 'session telemetry ignored an event absent from the canonical session log'
+@@ -98,7 +98,7 @@ function sharingStatusFor(mode: SessionTelemetryMode): SessionTelemetrySharingSt
+  * and shutdown deadline at plugin load; `DISABLED` reads neither.
+  */
+ export interface Config {
+-  /** Defaults to `FEEDBACK_ONLY`: capture session history only when feedback is explicitly submitted. */
++  /** Defaults to `DISABLED`: nothing is captured or uploaded unless a composition selects `FEEDBACK_ONLY`. */
+   mode?: SessionTelemetryMode
+   /**
+    * Passed verbatim to the SDK's OTLP/HTTP log exporter — the complete
+diff --git a/packages/session/session-telemetry-otel/tests/otel.spec.ts b/packages/session/session-telemetry-otel/tests/otel.spec.ts
+index 4e15d9058f..83f50c7059 100644
+--- a/packages/session/session-telemetry-otel/tests/otel.spec.ts
++++ b/packages/session/session-telemetry-otel/tests/otel.spec.ts
+@@ -472,14 +472,14 @@ describe('OpenTelemetrySessionBackend wire', () => {
+     const defaultCtx = new Context()
+     await defaultCtx.plugin(SessionStore)
+     const defaulted = await defaultCtx.plugin(OpenTelemetrySessionBackend, { exporter: { url } })
+-    expect(defaultCtx.sessionTelemetry.sharing).toBe('feedback-only')
++    expect(defaultCtx.sessionTelemetry.sharing).toBe('disabled')
+     await defaulted.dispose()
+ 
+     // No record was emitted by any mode, so nothing reached the collector.
+     expect(captures).toEqual([])
+   })
+ 
+-  it('defaults direct construction to feedback-only delivery', async () => {
++  it('defaults direct construction to disabled delivery', async () => {
+     const { url, captures } = await mockCollector()
+     const ctx = new Context()
+     try {
+@@ -491,13 +491,10 @@ describe('OpenTelemetrySessionBackend wire', () => {
+       const session = ctx.sessions.create(SessionId('direct-default'), { meta: {} })
+       session.append('request/header', { header: { config: { provider: 'deepseek-official', model: 'mock' } }, reason: 'initial' })
+       session.append('turn/start', { turn: 1 })
+-      expect(captures).toEqual([])
+       recordFeedback(session, { text: 'explicit report' })
+-      const submitted = session.snapshotEvents().map(event => event.type)
+-      await expect.poll(() => eventTypes(captures)).toEqual(submitted)
+       session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+       await ctx.sessionTelemetry.shutdown()
+-      expect(eventTypes(captures)).toEqual(submitted)
++      expect(captures).toEqual([])
+     } finally {
+       await ctx.fiber.dispose()
+     }
+@@ -742,12 +739,11 @@ describe('OpenTelemetrySessionBackend config fails loud', () => {
+     expectTypeOf<SessionTelemetryMode.FEEDBACK_ONLY>().toExtend<SessionTelemetryMode>()
+     expect(Object.values(SessionTelemetryMode)).toEqual(['FEEDBACK_ONLY', 'DISABLED'])
+     expect(() => Config({ mode: 'FULL' } as unknown as Config)).toThrow()
+-    expect(DEFAULT_TELEMETRY_MODE).toBe(SessionTelemetryMode.FEEDBACK_ONLY)
++    expect(DEFAULT_TELEMETRY_MODE).toBe(SessionTelemetryMode.DISABLED)
+     expect(Config({}).mode).toBe(DEFAULT_TELEMETRY_MODE)
+   })
+ 
+   it.each([
+-    [{}, /exporter\.url is required/],
+     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY }, /exporter\.url is required/],
+     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY, exporter: { url: '' } }, /exporter\.url is required/],
+     [{ mode: SessionTelemetryMode.FEEDBACK_ONLY, exporter: { url: 'not a url' } }, /not a valid URL/],
+diff --git a/packages/webhook/webhook/src/session.ts b/packages/webhook/webhook/src/session.ts
+index 384832f92a..732f923282 100644
+--- a/packages/webhook/webhook/src/session.ts
++++ b/packages/webhook/webhook/src/session.ts
+@@ -62,6 +62,9 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
+   let modelSelection: ModelSelection
+   if (model === undefined) {
+     const selected = ctx.agentDefaultModel.currentSelection()
++    if (selected === undefined) {
++      throw new TypeError('webhook Session request needs a model when no default model is configured')
++    }
+     agentOptions = { provider: selected.provider, model: selected.model }
+     modelSelection = { ...selected }
+   } else {
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 13ab4ef874..17f14aedf9 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -1664,9 +1664,6 @@ importers:
+       '@deepseek-ai/dsh-credentials-local':
+         specifier: workspace:^
+         version: link:../../credentials/credentials-local
+-      '@deepseek-ai/dsh-deepseek-llm-api-extensions':
+-        specifier: workspace:^
+-        version: link:../../llm/deepseek-llm-api-extensions
+       '@deepseek-ai/dsh-fs-local':
+         specifier: workspace:^
+         version: link:../../fs/fs-local
+@@ -1691,9 +1688,6 @@ importers:
+       '@deepseek-ai/dsh-llm':
+         specifier: workspace:^
+         version: link:../../llm/llm
+-      '@deepseek-ai/dsh-llm-deepseek':
+-        specifier: workspace:^
+-        version: link:../../llm/llm-deepseek
+       '@deepseek-ai/dsh-llm-pi-ai':
+         specifier: workspace:^
+         version: link:../../llm/llm-pi-ai
+@@ -1712,9 +1706,6 @@ importers:
+       '@deepseek-ai/dsh-plugin-manager':
+         specifier: workspace:^
+         version: link:../../boot/plugin-manager
+-      '@deepseek-ai/dsh-plugin-package-inventory-deepseek':
+-        specifier: workspace:^
+-        version: link:../../llm/plugin-package-inventory-deepseek
+       '@deepseek-ai/dsh-ptc-runtime-node':
+         specifier: workspace:^
+         version: link:../../ptc-runtime/ptc-runtime-node
+@@ -1736,9 +1727,6 @@ importers:
+       '@deepseek-ai/dsh-session-checkpoint-policy':
+         specifier: workspace:^
+         version: link:../../session/session-checkpoint-policy
+-      '@deepseek-ai/dsh-session-log-deepseek':
+-        specifier: workspace:^
+-        version: link:../../session/session-log-deepseek
+       '@deepseek-ai/dsh-session-persistence-jsonl':
+         specifier: workspace:^
+         version: link:../../session/session-persistence-jsonl
+@@ -1874,9 +1862,6 @@ importers:
+       '@deepseek-ai/dsh-web-fetch-http':
+         specifier: workspace:^
+         version: link:../../web/web-fetch-http
+-      '@deepseek-ai/dsh-web-search-deepseek':
+-        specifier: workspace:^
+-        version: link:../../web/web-search-deepseek
+       '@deepseek-ai/dsh-workflow-ptc':
+         specifier: workspace:^
+         version: link:../../workflow/workflow-ptc
