@@ -117,7 +117,11 @@ export function apply(ctx: Context): void {
   const uiWorkspace = new UiWorkspaceService(
     ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
   )
-  ctx.slots.provideRoot({ hooks: { workspaces: workspaces.list } })
+  // Root hooks reach every slot of the window: the Workspace snapshot for the
+  // browser, and the name this window serves for the page title and brand.
+  ctx.slots.provideRoot({
+    hooks: { workspaces: workspaces.list, brandTitle: uiWorkspace.workspaceTitle },
+  })
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-workspace: dictionaries')
   const shortcutControls = createWorkspaceShortcutControls()
 

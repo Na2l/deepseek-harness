@@ -48,6 +48,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface GlobalStandardProps {
     /** Subscribe to the selected main panel independently of parent renders. */
     usePanelInfo: UsePanelInfo
+    /**
+     * Name this window serves (contributed at runtime by the Workspace UI),
+     * shown in the page title. Optional so hand-built prop literals fall back
+     * to the product name.
+     */
+    useBrandTitle?: SnapshotSelectorHook<string | undefined>
   }
 
   interface SlotMap {

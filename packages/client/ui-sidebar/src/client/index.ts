@@ -33,6 +33,7 @@ const NS = 'sidebar'
 
 interface WorkspaceNavigation {
   startSession(workspaceId?: Parameters<SidebarRootInjected['startSession']>[0]): void
+  readonly workspaceTitle: SidebarRootInjected['hooks']['workspaceTitle']
 }
 
 /** Services required by the sidebar plugin. */
@@ -67,7 +68,7 @@ export function apply(ctx: ClientContext): void {
     startSession: (workspaceId) => { workspaceNavigation.startSession(workspaceId) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
-    hooks: { panels, shortcuts: ctx.shortcuts.catalog },
+    hooks: { panels, shortcuts: ctx.shortcuts.catalog, workspaceTitle: workspaceNavigation.workspaceTitle },
   })
   ctx.slots.inject('sidebar', () => ctx.slots.register({
     name: 'sidebar',

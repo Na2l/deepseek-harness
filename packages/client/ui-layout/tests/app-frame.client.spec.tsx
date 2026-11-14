@@ -60,6 +60,8 @@ function resize(width: number): void {
   })
 }
 
+const frameBrand: { title: string | undefined } = { title: undefined }
+
 function mountFrame(windowWidth = frameWidth) {
   vi.stubGlobal('innerWidth', windowWidth)
   const instance = createLayoutStore().create()
@@ -99,6 +101,7 @@ function mountFrame(windowWidth = frameWidth) {
       useSessionRetainInfo={() => undefined}
       useResource={useResource}
       useWorkspaces={sel => sel(workspaceState)}
+      useBrandTitle={sel => sel(frameBrand.title)}
       t={key => key === 'brand.localBuild' ? 'DSH Local Build' : key}
     />
   )
@@ -179,6 +182,7 @@ afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
+    frameBrand.title = undefined
   }
 })
 
@@ -186,6 +190,13 @@ describe('AppFrame', () => {
   it('localizes the product title without a configured build title', () => {
     mountFrame()
     expect(document.title).toBe('DSH Local Build')
+  })
+
+  it('names the served Workspace in the page title instead of the product name', () => {
+    frameBrand.title = 'llm-chat'
+    selectedSessionTitle = 'so everytime I start a'
+    mountFrame()
+    expect(document.title).toBe('so everytime I start a — llm-chat')
   })
 
   it('follows the selected durable Session title', () => {

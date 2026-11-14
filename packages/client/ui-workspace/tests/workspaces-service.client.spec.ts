@@ -302,6 +302,16 @@ function bench(options: BenchOptions = {}) {
 }
 
 describe('UiWorkspaceService', () => {
+  it('publishes the leaf of the Workspace serving the current Session as the window name', async () => {
+    const b = bench({
+      workspaces: workspaceState([workspace('alpha', [sid('a1')]), workspace('beta', [sid('b1')])]),
+      sessions: sessionState([summary('a1'), summary('b1')]),
+    })
+    expect(b.uiWorkspace.workspaceTitle.getSnapshot()).toBe('alpha')
+    b.uiWorkspace.openSession(sid('b1'))
+    await vi.waitFor(() => { expect(b.uiWorkspace.workspaceTitle.getSnapshot()).toBe('beta') })
+  })
+
   it('prepares and selects the default Workspace after both startup baselines', async () => {
     const b = bench({ configureWorkspaces: (workspaces) => {
       workspaces.initializeDefault.mockImplementation(async () => {

@@ -10,6 +10,7 @@ import type {
   SessionListState,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
@@ -25,8 +26,43 @@ interface MainSelection {
   readonly subagentAddress?: SubagentAddress
 }
 
+/**
+ * Last segment of a canonical directory path, ignoring trailing separators and
+ * accepting either separator because Workspace paths come from either platform.
+ * @param path - canonical Workspace directory.
+ * @returns the leaf name, or undefined for a path with no segment.
+ */
+function workspaceLeaf(path: string): string | undefined {
+  return path.split(/[\\/]+/u).filter(segment => segment.length > 0).at(-1)
+}
+
+/** Page global carrying the Workspace name the Web surface resolved. */
+interface WorkspaceLabelGlobal {
+  __DSH_WORKSPACE_LABEL__?: unknown
+}
+
+/**
+ * Name the Web surface published for the Workspace this instance serves. A
+ * container sees only its mount point, so the host directory's name can only
+ * come from the launcher; it wins over the registered path's leaf.
+ * @returns the published label, or undefined when the page carries none.
+ */
+function configuredWorkspaceLabel(): string | undefined {
+  const raw = (globalThis as WorkspaceLabelGlobal).__DSH_WORKSPACE_LABEL__
+  if (typeof raw !== 'string') return undefined
+  const label = raw.trim()
+  return label.length > 0 ? label : undefined
+}
+
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
+  /**
+   * Name this window serves — the Web surface's resolved Workspace label, else
+   * the leaf of the Workspace accounting the current Session. The page title
+   * and the sidebar brand render it.
+   */
+  readonly workspaceTitle: ObservableSnapshot<string | undefined>
+
   /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param target - known Session identity or durable direct-parent subagent address to display.
@@ -129,6 +165,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
+  /** {@inheritDoc UiWorkspace.workspaceTitle} */
+  readonly workspaceTitle = createSnapshotStore<string | undefined>(undefined)
   private mainReference: SessionReference | undefined
 
   /**
@@ -148,6 +186,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     private readonly notify: (toast: RowToast) => void,
   ) {
     super(ctx, 'uiWorkspace')
+    ctx.effect(() => {
+      // The title follows the Workspace this window serves, so it names the
+      // project rather than the build.
+      const sync = (): void => { this.workspaceTitle.set(this.currentWorkspaceLeaf()) }
+      const stops = [this.workspaces.list.subscribe(sync), this.selection.subscribe(sync)]
+      sync()
+      return () => { for (const stop of stops) stop() }
+    }, 'ui-workspace: workspace title')
     ctx.effect(() => {
       const stop = this.watchNavigation()
       return () => {
@@ -278,6 +324,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const result = await this.directoryPicker.createDirectory(path, name)
     if (!result.ok) throw new DirectoryBrowseError(result.error)
     return result.value
+  }
+
+  /**
+   * Name this window serves: the surface's published label, else the leaf of
+   * the Workspace accounting the current Session, else the first registered one.
+   * @returns the name, or undefined while nothing names the window.
+   */
+  private currentWorkspaceLeaf(): string | undefined {
+    const configured = configuredWorkspaceLabel()
+    if (configured !== undefined) return configured
+    const { items } = this.workspaces.list.getSnapshot()
+    const { sessionId } = this.selection.getSnapshot()
+    const owner = (sessionId === undefined
+      ? undefined
+      : items.find(item => item.sessionIds.includes(sessionId))) ?? items[0]
+    return owner === undefined ? undefined : workspaceLeaf(owner.path)
   }
 
   private watchNavigation(): () => void {

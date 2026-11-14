@@ -94,10 +94,14 @@ export function SidebarRoot({
   usePanels,
   useShortcuts,
   usePanelInfo,
+  useWorkspaceTitle,
   t,
   renderSlot,
 }: SidebarRootComponentProps) {
   const panels = usePanels(snapshot => snapshot)
+  // The Workspace name labels the project this window serves; the generic
+  // product name is only the pre-registration fallback.
+  const titleText = useWorkspaceTitle(title => title) ?? t('brand.localBuild')
   const shortcut = useShortcuts(rows => rows.find(row => row.id === 'sidebar.left.toggle'))
   const newShortcut = useShortcuts(rows => rows.find(row => row.id === 'session.new'))
   const toggleLabel = collapsed ? t('toggle.open') : t('toggle.collapse')
@@ -227,10 +231,10 @@ export function SidebarRoot({
               <span className={css.brandName}>
                 {renderSlot('sidebar.brand.name', {}, {
                   fallback: buildVersion === undefined
-                    ? <span className={css.fallbackBrandName}>{t('brand.localBuild')}</span>
+                    ? <span className={css.fallbackBrandName}>{titleText}</span>
                     : (
                       <span className={css.localBuildBrand}>
-                        <span className={css.localBuildTitle}>{t('brand.localBuild')}</span>
+                        <span className={css.localBuildTitle}>{titleText}</span>
                         <span className={css.buildVersion}>{buildVersion}</span>
                       </span>
                     ),

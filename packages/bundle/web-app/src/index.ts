@@ -22,6 +22,7 @@ import { addHarnessSourceSection, auditStartupEntries } from '@deepseek-ai/dsh-a
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+import { workspaceLabel, WORKSPACE_LABEL_GLOBAL } from './workspace-label.ts'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -229,6 +230,15 @@ export function apply(ctx: Context, config: Config): void {
   const handoffBrowser = config.openBrowser && !launchedThroughSsh(launchEnvironmentOf(ctx))
   // Release dependent rows only after bind-dependent trust has been sampled once.
   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
+  // Name the Workspace this surface serves: the page title and the sidebar
+  // brand read it, so a bind-mounted project shows its host directory name
+  // instead of the mount point ("workspace") or the generic product name.
+  const workspaceName = workspaceLabel(process.env, process.env['DSH_WORKSPACE'] ?? process.cwd())
+  if (workspaceName !== undefined) {
+    ctx.on('webserver/index-inject', (table) => {
+      table.push({ kind: 'global', name: WORKSPACE_LABEL_GLOBAL, value: workspaceName })
+    })
+  }
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
