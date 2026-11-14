@@ -54,7 +54,7 @@ async function bench(collapsed = false, track?: TrackProductEvent) {
     apply(ctx: Context) {
       ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
       ctx.provide('layout', layout)
-      ctx.provide('uiWorkspace', { startSession: vi.fn() } as never)
+      ctx.provide('uiWorkspace', { startSession: vi.fn(), workspaceTitle: createSnapshotStore<string | undefined>(undefined) } as never)
       ctx.provide('locale', locale)
       if (track !== undefined) ctx.provide('productAnalytics', { track } as never)
       ctx.effect(() => locale.register('common', { zh: commonZh, en: commonEn }), 'panel test: common locale')
