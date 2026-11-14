@@ -42,6 +42,7 @@ const NS = 'sidebar'
 
 interface WorkspaceNavigation {
   startSession(workspaceId?: Parameters<SidebarRootInjected['startSession']>[0]): void
+  readonly workspaceTitle: SidebarRootInjected['hooks']['workspaceTitle']
 }
 
 /** Services required by the sidebar plugin. */
@@ -83,7 +84,10 @@ export function apply(ctx: ClientContext): void {
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     setPinned: panelPins.setPinned,
     trackEntryClick: (attributes) => { ctx.get('productAnalytics')?.track('sidebar_menu_click', attributes) },
-    hooks: { panels, shortcuts: ctx.shortcuts.catalog, entryPins: panelPins.unpinned, entryActions },
+    hooks: {
+      panels, shortcuts: ctx.shortcuts.catalog, entryPins: panelPins.unpinned, entryActions,
+      workspaceTitle: workspaceNavigation.workspaceTitle,
+    },
   })
   ctx.slots.inject('sidebar', function* () {
     yield ctx.slots.registerFactory({

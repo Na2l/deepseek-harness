@@ -26,6 +26,7 @@ import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import { parsePublicUrl } from './public-url.ts'
+import { workspaceLabel, WORKSPACE_LABEL_GLOBAL } from './workspace-label.ts'
 
 /** The Web GUI this process serves, provided by the `web-runtime` row. */
 export interface WebApp {
@@ -213,6 +214,15 @@ export function apply(ctx: Context, config: Config): void {
   /** The advertised root: the canonical `publicUrl`, or the listener's own origin. */
   const appRootUrl = (): string => publicUrl ?? ctx.webServer.getOrigin()
   ctx.provide('webApp', { getAdvertisedUrl: appRootUrl } satisfies WebApp)
+  // Name the Workspace this surface serves: the page title and the sidebar
+  // brand read it, so a bind-mounted project shows its host directory name
+  // instead of the mount point ("workspace") or the generic product name.
+  const workspaceName = workspaceLabel(process.env, process.env['DSH_WORKSPACE'] ?? process.cwd())
+  if (workspaceName !== undefined) {
+    ctx.on('webserver/index-inject', (table) => {
+      table.push({ kind: 'global', name: WORKSPACE_LABEL_GLOBAL, value: workspaceName })
+    })
+  }
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['shellEnv'], (runtimeCtx) => {

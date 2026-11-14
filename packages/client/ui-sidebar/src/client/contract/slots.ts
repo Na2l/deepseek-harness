@@ -237,6 +237,11 @@ export type SidebarRootInjected = {
     entryPins: ObservableSnapshot<readonly string[]>
     /** Whether `sidebar.panellist.actions` has registrations. */
     entryActions: ObservableSnapshot<boolean>
+    /**
+     * Name of the Workspace this sidebar serves, or undefined while none is
+     * known; the brand renders it in place of the product name.
+     */
+    workspaceTitle: ObservableSnapshot<string | undefined>
   }
 }
 

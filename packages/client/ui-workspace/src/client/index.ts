@@ -163,7 +163,9 @@ export function apply(ctx: Context): void {
     ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
   )
   ctx.slots.provideRoot({
-    hooks: { workspaces: workspaces.list },
+    // Root hooks reach every slot of the window: the Workspace snapshot for
+    // the browser, and the name this window serves for the page title/brand.
+    hooks: { workspaces: workspaces.list, brandTitle: uiWorkspace.workspaceTitle },
     keyedHooks: {
       workspaceAccess: (workspaceId, action) => action === undefined
         ? undefined

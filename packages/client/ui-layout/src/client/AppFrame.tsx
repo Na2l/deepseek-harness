@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  GlobalStandardProps, HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_DRAWER_BREAKPOINT } from './columns.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
@@ -30,6 +30,9 @@ export interface AppFrameInjected {
 }
 
 /** Full composed props: runtime, child slots, store, locale, and injected posture. */
+/** Stand-in for the optional brand hook when a hand-built tree provides none. */
+const absentBrandTitle: NonNullable<GlobalStandardProps['useBrandTitle']> = select => select(undefined)
+
 export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'sidebar' | 'main' | 'rightbar' | 'shell.bottom' | 'shell.overlay' | 'shell.leading'>
@@ -130,6 +133,7 @@ export function AppFrame({
   useStore,
   useSessions,
   usePanelInfo,
+  useBrandTitle = absentBrandTitle,
   useFoldedLandscape,
   actions,
   renderSlot,
@@ -258,7 +262,9 @@ export function AppFrame({
   const onRightbarDrag = useCallback((dx: number) => {
     actions.setRightbar(rightbarBase.current - dx)
   }, [actions])
-  const productTitle = process.env.DSH_CLIENT_TITLE ?? t('brand.localBuild')
+  // The window names the project it serves; the product name is the fallback
+  // while no Workspace name is known.
+  const productTitle = useBrandTitle(title => title) ?? process.env.DSH_CLIENT_TITLE ?? t('brand.localBuild')
   // The rendered template lets the grid solve the squeeze natively: the centre
   // declares its protected minimum and the right column bids up to the clamped
   // preference, so a window resize lands in the same layout pass as the frame
