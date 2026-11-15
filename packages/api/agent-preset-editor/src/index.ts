@@ -13,25 +13,12 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-config-editor'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { presetRowId, removePreset, upsertPreset, type PresetDeclaration } from './patch-document.ts'
+import { presetRowId, removePreset, upsertPreset } from './patch-document.ts'
+import type { PresetDeclaration, PresetEditorOptions, PresetSaveResult } from './types.ts'
 import { validateDeclaration } from './validate.ts'
 
-export type { PresetDeclaration } from './patch-document.ts'
+export type { PresetDeclaration, PresetEditorOptions, PresetSaveResult } from './types.ts'
 export type { PresetValidationIssue } from './validate.ts'
-
-/** Dropdown sources for the editor's inspector. */
-export interface PresetEditorOptions {
-  /** Provider routes with the models each one serves. */
-  readonly providers: ReadonlyArray<{ readonly id: string; readonly models: readonly string[] }>
-}
-
-/** Result of a successful save. */
-export interface PresetSaveResult {
-  /** Preset identity written into the declaration. */
-  readonly id: string
-  /** Profile-patch row that now carries it. */
-  readonly rowId: string
-}
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {

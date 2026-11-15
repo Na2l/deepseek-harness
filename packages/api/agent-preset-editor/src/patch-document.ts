@@ -9,19 +9,7 @@
 
 import { stringify } from 'yaml'
 
-/** One agent-preset declaration, as the profile patch spells it. */
-export interface PresetDeclaration {
-  /** Preset identity used by sessions and the picker. */
-  readonly id: string
-  /** Display name; defaults to the id in the picker. */
-  readonly name?: string
-  /** One-line description shown by the picker. */
-  readonly description?: string
-  /** Ascending picker order. */
-  readonly order?: number
-  /** Child plugin rows: persona, tools, subagents, skills, … */
-  readonly plugins: readonly unknown[]
-}
+import type { PresetDeclaration } from './types.ts'
 
 /** Plugin package that carries a preset declaration. */
 export const PRESET_PLUGIN = '@deepseek-ai/dsh-agent-preset'

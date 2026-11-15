@@ -1,6 +1,6 @@
 /** Shape rules a preset declaration must satisfy before it reaches the patch. */
 
-import type { PresetDeclaration } from './patch-document.ts'
+import type { PresetDeclaration } from './types.ts'
 
 /** One refusal, addressed to the field that caused it. */
 export interface PresetValidationIssue {
@@ -12,11 +12,6 @@ export interface PresetValidationIssue {
 
 /** Preset identity accepted by the picker, session options and this editor. */
 const ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u
-
-/** One plugin row inside a preset declaration. */
-function isEntry(value: unknown): value is { id?: unknown; name?: unknown } {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /**
  * Check a declaration without touching disk.
@@ -39,7 +34,7 @@ export function validateDeclaration(
     issues.push({ field: 'plugins', message: 'a preset needs at least one plugin row' })
   }
   declaration.plugins.forEach((entry, index) => {
-    if (!isEntry(entry)) {
+    if (entry === null || typeof entry !== 'object') {
       issues.push({ field: `plugins[${String(index)}]`, message: 'a plugin row must be a mapping' })
       return
     }

@@ -43,7 +43,7 @@ describe('validateDeclaration', () => {
   it('rejects a row without a name and a non-mapping row', () => {
     const issues = validateDeclaration({
       id: 'x',
-      plugins: [{ id: 'persona' }, 'nope'],
+      plugins: [{ id: 'persona' }, 'nope' as unknown as { readonly name?: string }],
     }, resolvable)
     expect(issues.map(issue => issue.field)).toEqual(['plugins[0].name', 'plugins[1]'])
   })
