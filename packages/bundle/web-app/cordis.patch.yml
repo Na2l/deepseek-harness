@@ -342,6 +342,13 @@
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
 
+    # Author agent presets from Settings instead of hand-editing the patch.
+    - id: agent-preset-editor
+      name: '@deepseek-ai/dsh-api-agent-preset-editor'
+
+    - id: ui-settings-agent-presets
+      name: '@deepseek-ai/dsh-client-ui-settings-agent-presets'
+
     # Plugin management: the sidebar Plugins page installs, enables, disables,
     # and removes the profile's bundles through the `pluginManager` Remote.
     # Without a profile-backed Host it reports itself unavailable.
