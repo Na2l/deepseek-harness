@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import type {} from '@deepseek-ai/dsh-api-agent-preset-editor/remote'
+import agentPresetEditorRemote from '@deepseek-ai/dsh-api-agent-preset-editor/remote'
 import { PresetEditorPage, type EditorApi } from './PresetEditorPage.tsx'
 
 /** Remote namespaces the page reads and writes. */
@@ -13,6 +13,12 @@ export const inject = ['slots', 'remote', 'remote.agentPresets', 'remote.agentPr
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
+  // Mount this package's own Remote namespace, so the page works in a profile
+  // that predates it without patching the shared api-remotes aggregate.
+  ctx.effect(() => {
+    const mounting = ctx.remote.$mount(agentPresetEditorRemote)
+    return () => { void mounting.then(dispose => dispose()) }
+  }, 'ui-settings-agent-presets: remote namespace')
   const api: EditorApi = {
     list: async () => ((await ctx.remote.agentPresets.list()) as { presets?: never }).presets ?? [],
     read: async id => (await ctx.remote.agentPresets.read(id)) as { content?: string },
