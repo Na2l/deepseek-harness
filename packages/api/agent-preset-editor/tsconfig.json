@@ -1,0 +1,33 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../preset/agent-preset-registry"
+    },
+    {
+      "path": "../../llm/llm"
+    },
+    {
+      "path": "../../util/atomic-write"
+    },
+    {
+      "path": "../../boot/app-boot"
+    },
+    {
+      "path": "../../typert/protocol"
+    },
+    {
+      "path": "../../boot/config-editor"
+    }
+  ]
+}
